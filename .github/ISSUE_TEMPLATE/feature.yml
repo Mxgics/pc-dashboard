@@ -1,0 +1,15 @@
+name: Improvement
+description: Suggest a focused dashboard improvement
+title: "[Idea]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Privacy and safety considerations

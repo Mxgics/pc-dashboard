@@ -1,0 +1,88 @@
+@implements IAsyncDisposable
+@inject DashboardService Data
+@inject IDashboardStore Store
+
+<main>
+    <header>
+        <div><p class="eyebrow">YOUR WINDOWS WORKSPACE</p><h1>PC Dashboard<span class="version">V1 · READ ONLY</span></h1><p class="subtitle">Know what’s installed. See what needs a closer look.</p></div>
+        <div class="actions"><button class="primary" disabled="@Data.IsRefreshing" @onclick="Refresh">@(Data.IsRefreshing ? "Refreshing…" : "Refresh now")</button>@if (Data.IsRefreshing) { <button @onclick="Data.Cancel">Cancel</button> }</div>
+    </header>
+    <div role="status" aria-live="polite" class="statusline">@message @if (Data.IsRefreshing) { <span>Checking your PC. You can keep browsing cached results.</span> } else { <span>Local data · Checks run only while this window is open</span> }</div>
+    @if (Data.Error is not null) { <p class="notice" role="alert">@Data.Error</p> }
+    @foreach (var source in Data.Snapshot.Health.Where(s => !s.Success))
+    { <p class="notice" role="status"><strong>@source.Source unavailable.</strong> Cached results are retained where available. @source.Error</p> }
+    <section class="stats" aria-label="Inventory summary">
+        <article><span>Installed entries</span><strong>@Data.Snapshot.Apps.Count</strong><small>Desktop &amp; packaged apps</small></article>
+        <article class="accent"><span>Updates reported</span><strong>@Data.Snapshot.Apps.Count(a => a.Update?.Status == UpdateStatus.Available)</strong><small>Based on source evidence</small></article>
+        <article><span>Needs verification</span><strong>@Data.Snapshot.Apps.Count(a => a.Update is null || a.Update.Status is UpdateStatus.Unknown or UpdateStatus.Unsupported or UpdateStatus.Failed)</strong><small>Unknown or uncovered apps</small></article>
+        <article><span>Categories</span><strong>@categories.Count</strong><small>Your organization, your rules</small></article>
+    </section>
+    <section class="inventory" aria-labelledby="inventory-heading">
+        <div class="section-title"><h2 id="inventory-heading">Applications</h2><span>@Filtered.Count() entries shown</span></div>
+        <div class="filters">
+            <label class="search">Search apps<input type="search" placeholder="Name, publisher or version" @bind="query" @bind:event="oninput" /></label>
+            <label>Category<select @bind="categoryFilter"><option value="">All categories</option>@foreach (var category in categories) { <option>@category</option> }</select></label>
+            <label>Update status<select @bind="statusFilter"><option value="">All statuses</option>@foreach (var status in Enum.GetValues<UpdateStatus>()) { <option value="@status">@Label(status)</option> }</select></label>
+            <label>Sort by<select @bind="sort"><option value="name">Name A–Z</option><option value="name-desc">Name Z–A</option><option value="publisher">Publisher</option><option value="status">Update status</option></select></label>
+        </div>
+        <div class="table-wrap"><table><caption class="sr-only">Installed applications and source-reported update status</caption><thead><tr><th scope="col">Application</th><th scope="col">Installed version</th><th scope="col">Category</th><th scope="col">Update evidence</th><th scope="col">Details</th></tr></thead><tbody>
+        @foreach (var app in Filtered)
+        {
+            <tr @key="app.Id"><td><strong>@app.Name</strong><small>@(string.IsNullOrWhiteSpace(app.Publisher) ? "Publisher not supplied" : app.Publisher)</small></td><td class="mono">@(app.Version ?? "Not supplied")<small>@app.Scope · @app.Architecture</small></td><td><select aria-label="@($"Category for {app.Name}")" value="@Category(app)" @onchange="e => Assign(app.Id, e.Value?.ToString() ?? string.Empty)">@foreach (var category in categories) { <option>@category</option> }</select></td><td><span class="badge @((app.Update?.Status ?? UpdateStatus.Unknown).ToString().ToLowerInvariant())">@Label(app.Update?.Status ?? UpdateStatus.Unknown)</span><small>@Freshness(app)</small></td><td><button aria-label="@($"View details for {app.Name}")" @onclick="() => selectedId = selectedId == app.Id ? null : app.Id" aria-expanded="@(selectedId == app.Id)">@(selectedId == app.Id ? "Close" : "View")</button></td></tr>
+            @if (selectedId == app.Id)
+            { <tr class="detail"><td colspan="5"><h3>@app.Name — evidence</h3><dl><dt>Inventory identity</dt><dd>@app.NativeId</dd><dt>Inventory source</dt><dd>@app.Source</dd><dt>Observed</dt><dd>@app.ObservedAt.ToLocalTime().ToString("g")</dd><dt>Update source / package</dt><dd>@(app.Update?.Source ?? "Not checked") / @(app.Update?.PackageId ?? "Not matched")</dd><dt>Source version offered</dt><dd>@(app.Update?.AvailableVersion ?? "Not supplied")</dd><dt>Last update check</dt><dd>@(app.Update?.CheckedAt?.ToLocalTime().ToString("g") ?? "No successful check")</dd><dt>Pin information</dt><dd>@(app.Update?.Pin ?? "Not exposed")</dd></dl><p>@(app.Update?.Note ?? "An update check has not yet established evidence for this app.")</p></td></tr> }
+        }
+        </tbody></table></div>
+        @if (!Filtered.Any()) { <div class="empty"><h3>@(Data.Snapshot.Apps.Count == 0 ? "No inventory yet" : "No matching applications")</h3><p>@(Data.Snapshot.Apps.Count == 0 ? "Refresh to read installed applications. Source failures will be shown above." : "Try a different search or clear your filters.")</p></div> }
+    </section>
+    <details class="category-editor"><summary>Manage categories</summary><p>Suggestions are a starting point. Your assignments survive refreshes.</p><div class="filters"><label>New category<input maxlength="40" @bind="newCategory" /></label><button @onclick="AddCategory">Create category</button><label>Rename category<select @bind="renameFrom"><option value="">Choose category</option>@foreach (var category in categories) { <option>@category</option> }</select></label><label>New name<input maxlength="40" @bind="renameTo" /></label><button @onclick="RenameCategory">Rename</button></div></details>
+    <footer><p>“None reported” means the checked sources did not report an update. It does not guarantee the latest publisher release.</p><p>No software is changed. V2: approved updates · V3: cleanup, setup &amp; backups.</p></footer>
+</main>
+
+@code {
+    private string query = "", categoryFilter = "", statusFilter = "", sort = "name", newCategory = "", renameFrom = "", renameTo = "";
+    private string? selectedId, message;
+    private IReadOnlyList<string> categories = Categories.Defaults;
+    private IReadOnlyDictionary<string, string> assignments = new Dictionary<string, string>();
+    private IReadOnlyDictionary<string, string> aliases = new Dictionary<string, string>();
+    private readonly CancellationTokenSource lifetime = new();
+    private Task? timerTask;
+    private IEnumerable<InstalledApp> Filtered {
+        get {
+            var rows = Data.Snapshot.Apps.Where(a => string.IsNullOrEmpty(query) || $"{a.Name} {a.Publisher} {a.Version}".Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Where(a => categoryFilter == "" || Category(a) == categoryFilter)
+                .Where(a => statusFilter == "" || (a.Update?.Status ?? UpdateStatus.Unknown).ToString() == statusFilter);
+            return sort switch { "name-desc" => rows.OrderByDescending(a => a.Name), "publisher" => rows.OrderBy(a => a.Publisher).ThenBy(a => a.Name), "status" => rows.OrderBy(a => a.Update?.Status ?? UpdateStatus.Unknown).ThenBy(a => a.Name), _ => rows.OrderBy(a => a.Name) };
+        }
+    }
+    private string Category(InstalledApp app) => assignments.GetValueOrDefault(app.Id) ?? aliases.GetValueOrDefault(Categories.Suggest(app)) ?? "Uncategorized";
+    private static string Label(UpdateStatus status) => status switch { UpdateStatus.NoneReported => "None reported", _ => status.ToString() };
+    private string Freshness(InstalledApp app) {
+        if (app.Update?.CheckedAt is not { } date) return "Not checked successfully";
+        var failed = Data.Snapshot.Health.Any(h => h.Source == "WinGet" && !h.Success && h.AttemptedAt > date);
+        return failed ? "Cached · latest check failed" : DateTimeOffset.UtcNow - date >= TimeSpan.FromHours(24) ? "Stale · refresh needed" : $"Checked {date.ToLocalTime():g}";
+    }
+    protected override async Task OnInitializedAsync() {
+        Data.Changed += OnChanged;
+        try { await LoadCategories(); await Data.LoadAsync(); }
+        catch (Exception ex) { message = $"Local data could not be loaded: {ex.Message}"; return; }
+        timerTask = RunAsync();
+    }
+    private async Task RunAsync() {
+        try {
+            await Data.RefreshAsync(ct: lifetime.Token);
+            using var timer = new PeriodicTimer(TimeSpan.FromMinutes(15));
+            var ticks = 0;
+            while (await timer.WaitForNextTickAsync(lifetime.Token)) {
+                ticks++; await Data.RefreshAsync(ct: lifetime.Token, checkUpdates: ticks % 4 == 0);
+            }
+        } catch (OperationCanceledException) { }
+    }
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+    private Task Refresh() => Data.RefreshAsync(forceUpdates: true, ct: lifetime.Token);
+    private async Task LoadCategories() { categories = await Store.CategoriesAsync(); assignments = await Store.AssignmentsAsync(); aliases = await Store.CategoryAliasesAsync(); }
+    private async Task Assign(string id, string category) { try { await Store.AssignAsync(id, category); await LoadCategories(); message = "Category saved."; } catch (Exception ex) { message = ex.Message; } }
+    private async Task AddCategory() { try { await Store.AddCategoryAsync(newCategory); newCategory = ""; await LoadCategories(); message = "Category created."; } catch (Exception ex) { message = $"Could not create category: {ex.Message}"; } }
+    private async Task RenameCategory() { try { await Store.RenameCategoryAsync(renameFrom, renameTo); categoryFilter = ""; renameFrom = renameTo = ""; await LoadCategories(); message = "Category renamed."; } catch (Exception ex) { message = $"Could not rename category: {ex.Message}"; } }
+    public async ValueTask DisposeAsync() { Data.Changed -= OnChanged; lifetime.Cancel(); Data.Cancel(); if (timerTask is not null) await timerTask; lifetime.Dispose(); }
+}
