@@ -31,7 +31,7 @@ Rollback: close the app and preserve its data and current release folder. Only r
 
 ## V2 — foundation only
 
-The core request/result contracts and approval gate are implemented, but no executor or UI is registered and the application still cannot update software. Approvals expire after five minutes and are rejected if identity, source, installed version or target evidence changed, or another action is running. Before release, document and verify structured package resolution, elevation, progress, cancellation limits, restart policy, partial failure and post-update inventory verification. Inventory refresh remains separate from execution.
+The immutable plan/approval contracts, schema 2 action history and shared refresh/mutation gate are implemented, but no resolver, executor or UI is registered and the application still cannot update software. Plans expire after five minutes and are rejected for tampering, changed identity/source/version/resolution, unaccepted agreements, or overlapping work. The most recent 100 action records are retained; a record left planned or running is marked interrupted when the store next opens. Before release, document and verify structured package execution, elevation, progress, cancellation limits, restart policy, partial failure and post-update inventory verification. Inventory evidence never authorizes execution.
 
 ## V3 — future only
 

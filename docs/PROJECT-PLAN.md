@@ -17,7 +17,7 @@ Cached startup; inventory on launch/every 15 minutes while open; hourly freshnes
 
 ## Version roadmap and runbook gates
 
-5. **V2 — approved updates, in progress.** The separate action interface and single-action gate now reject missing, expired, stale, overlapping or evidence-mismatched approvals. Remaining: a structured WinGet executor, fresh preflight resolution, progress and cancellation semantics, elevation/reboot policy, post-action inventory verification, partial-failure recovery and the explicit approval UI. Test the full path before adding executable update instructions to the runbook. Inventory evidence never authorizes execution.
+5. **V2 — approved updates, in progress.** Immutable five-minute plans now freeze full resolution metadata, bind approval to a digest, require agreement acceptance, re-resolve before execution, persist bounded action outcomes and share an exclusion gate with refresh. Remaining: the structured WinGet resolver/executor, progress and cancellation semantics, result mapping, post-action inventory verification and explicit approval UI. Test the full path before adding executable update instructions to the runbook. Inventory evidence never authorizes execution.
 6. **V3 — cleanup/setup/backups, not implemented.** Define previews/exclusions and recovery for cleanup, repeatable reviewed desired state for setup, and destination/retention/encryption plus tested restores for backups. Add capability-specific runbooks alongside code. No maintenance commands exist in v1.
 
 Keep phase/acceptance criteria, ADRs, cause/fix/verification change notes, tests and runbooks aligned with each version.

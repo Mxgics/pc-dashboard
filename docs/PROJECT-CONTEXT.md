@@ -2,7 +2,7 @@
 
 ## Current state
 
-V1 is implemented and release-verified as a personal Windows desktop application. It uses .NET 10, WPF and Blazor Hybrid with SQLite for the latest inventory snapshot and category preferences. The current application UI remains read-only: it does not install, update or remove software, expose a web server, create accounts, run a background service, or send inventory to an application backend. V2 has begun with an unregistered core approval boundary; no executor or approval UI exists yet.
+V1 is implemented and release-verified as a personal Windows desktop application. It uses .NET 10, WPF and Blazor Hybrid with SQLite for the latest inventory snapshot and category preferences. The current application UI remains read-only: it does not install, update or remove software, expose a web server, create accounts, run a background service, or send inventory to an application backend. V2 now has an unregistered immutable-plan boundary, shared operation coordinator and schema 2 action recovery; no package resolver, executor or approval UI exists yet.
 
 The packaged framework-dependent release was verified at `artifacts/win-x64/PcDashboard.Desktop.exe`, with its adjacent dependencies and README. It requires Windows 11 x64 build 26100+, .NET 10 Desktop Runtime and WebView2. No administrator rights are required.
 

@@ -1,8 +1,8 @@
 namespace PcDashboard.Core;
 
-public sealed class DashboardService(IDashboardStore store, IEnumerable<IInventoryProvider> providers, IUpdateProvider updates)
+public sealed class DashboardService(IDashboardStore store, IEnumerable<IInventoryProvider> providers,
+    IUpdateProvider updates, OperationCoordinator operations)
 {
-    private readonly SemaphoreSlim gate = new(1, 1);
     private CancellationTokenSource? active;
     public Snapshot Snapshot { get; private set; } = Snapshot.Empty;
     public bool IsRefreshing { get; private set; }
@@ -12,7 +12,9 @@ public sealed class DashboardService(IDashboardStore store, IEnumerable<IInvento
     public void Cancel() => active?.Cancel();
     public async Task RefreshAsync(bool inventory = true, bool forceUpdates = false, CancellationToken ct = default, bool checkUpdates = true)
     {
-        if (!await gate.WaitAsync(0, ct)) return;
+        var lease = await operations.TryBeginRefreshAsync(ct);
+        if (lease is null) return;
+        await using var operation = lease;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
         active = cancellation; IsRefreshing = true; Error = null; Changed?.Invoke();
         try
@@ -57,6 +59,6 @@ public sealed class DashboardService(IDashboardStore store, IEnumerable<IInvento
         }
         catch (OperationCanceledException) { Error = "Refresh cancelled. The previous snapshot was retained."; }
         catch (Exception ex) { Error = $"Refresh failed; the previous snapshot was retained. {ex.Message}"; }
-        finally { active = null; IsRefreshing = false; gate.Release(); Changed?.Invoke(); }
+        finally { active = null; IsRefreshing = false; Changed?.Invoke(); }
     }
 }
