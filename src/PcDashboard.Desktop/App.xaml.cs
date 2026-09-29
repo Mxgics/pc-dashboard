@@ -32,9 +32,12 @@ public partial class App : Application
             collection.AddLogging(builder => builder.AddProvider(new LocalLogProvider(diagnostics, () =>
                 Dispatcher.BeginInvoke(new Action(() => MessageBox.Show("Local diagnostics could not be saved. Check local data permissions and free disk space.", "PC Dashboard"))))));
             collection.AddWpfBlazorWebView();
+            collection.AddSingleton(store);
             collection.AddSingleton<IDashboardStore>(store);
+            collection.AddSingleton<IActionStore>(store);
             foreach (var provider in providers) collection.AddSingleton(provider);
             collection.AddSingleton<IUpdateProvider, WinGetUpdates>();
+            collection.AddSingleton<OperationCoordinator>();
             collection.AddSingleton<DashboardService>();
             services = collection.BuildServiceProvider();
             new MainWindow(services).Show();

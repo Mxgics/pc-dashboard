@@ -35,3 +35,11 @@ Verification: Release compilation and 26 behavioral checks passed. Earlier nativ
 - Change: remove personal evidence, replace file logging with bounded SQLite diagnostics, disable command-line exports, and import selected legacy evidence before removing source files. Keep runtime profiles explicitly documented. Map compiler source paths to a neutral root.
 - Compatibility: diagnostic tables are additive; snapshot and category data are retained. Older binaries do not enforce this privacy boundary.
 - Verification: locked restore and serialized Release build succeeded; 41 behavioral checks passed, including retention, legacy import retry, lock failures and no fallback files. NuGet vulnerability checks were unavailable (NU1900). Native UI verification remains outstanding.
+
+## 2026-09-29 — V2 immutable update plans and action recovery
+
+- Problem: the provisional V2 request mixed approval with execution input, did not freeze installer/elevation/agreement metadata, and kept neither durable action state nor a shared refresh/mutation gate.
+- Cause: the first boundary proved explicit approval and exact evidence matching before the structured WinGet execution contract was designed.
+- Change: replace requests with five-minute immutable plans and digest-bound approvals; resolve twice and reject drift/tampering; require agreement acceptance; share one non-blocking operation coordinator across refresh and mutation; add SQLite schema 2 with 100 bounded action records and startup interruption recovery.
+- Rationale: reviewed facts remain distinct from live execution facts, concurrent operations fail closed, and a terminated process cannot leave a durable action marked running.
+- Verification: locked restore, serialized Release build and 51 behavioral checks passed. NuGet vulnerability lookup remained unavailable with NU1900 warnings. No executor or update UI is registered, so native update execution was not tested.

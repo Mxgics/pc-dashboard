@@ -2,9 +2,9 @@
 
 ## Automated
 
-Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 17 September 2026, 33 checks passed: the V1 identity, persistence, failure, cancellation and category cases plus V2 exact-evidence approval, missing/expired approval, changed installed version and overlapping action rejection.
+Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 29 September 2026, 51 checks passed: the V1 identity, privacy, persistence, failure, cancellation and category cases plus V2 immutable plans, digest tampering, deterministic expiry, agreement acceptance, execution-time drift, action persistence/retention, startup interruption recovery, newer-schema rejection, and refresh/mutation exclusion.
 
-Serialized release solution build (`dotnet build PcDashboard.slnx -c Release --no-restore -m:1`) passed with zero warnings/errors. Dependency vulnerability lookup remains unverified.
+Serialized Release solution build (`dotnet build PcDashboard.slnx -c Release --no-restore -m:1`) passed with zero errors. NuGet vulnerability lookup remains unverified because the service was unavailable and emitted NU1900 warnings.
 
 ## Native provider evidence
 

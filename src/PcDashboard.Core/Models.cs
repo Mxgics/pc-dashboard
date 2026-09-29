@@ -1,7 +1,12 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+
 namespace PcDashboard.Core;
 
 public enum UpdateStatus { Unknown, Available, NoneReported, Unsupported, Failed }
-public enum UpdateActionStatus { Planned, Rejected, Running, Succeeded, Failed, Cancelled, RestartRequired }
+public enum ActionKind { Update }
+public enum ActionStatus { Planned, Rejected, Running, Succeeded, SucceededUnverified, Failed, Cancelled, RestartRequired, Interrupted }
+public enum ActionProgressStage { Queued, Downloading, Installing, PostInstall, Verifying, Completed }
 public sealed record UpdateEvidence(UpdateStatus Status, string Source, string? PackageId = null,
     string? AvailableVersion = null, DateTimeOffset? CheckedAt = null, string? Note = null, string? Pin = null);
 public sealed record InstalledApp(string Id, string Name, string? Version, string? Publisher,
@@ -10,14 +15,42 @@ public sealed record InstalledApp(string Id, string Name, string? Version, strin
 public sealed record SourceHealth(string Source, DateTimeOffset AttemptedAt, bool Success, string? Error = null);
 public sealed record InventoryResult(string Source, IReadOnlyList<InstalledApp> Apps, SourceHealth Health);
 public sealed record UpdateResult(IReadOnlyDictionary<string, UpdateEvidence> Evidence, SourceHealth Health);
-public sealed record UpdateRequest(string AppId, string PackageId, string Source, string ExpectedInstalledVersion,
-    string TargetVersion, DateTimeOffset ApprovedAt, string ApprovalToken);
-public sealed record UpdateActionResult(UpdateActionStatus Status, string AppId, string PackageId,
-    string? Message = null, int? InstallerErrorCode = null, bool RestartRequired = false,
-    DateTimeOffset? CompletedAt = null);
 public sealed record Snapshot(IReadOnlyList<InstalledApp> Apps, IReadOnlyList<SourceHealth> Health)
 {
     public static Snapshot Empty => new([], []);
+}
+
+public sealed record PackageAgreementInfo(string Label, string? Text, string? Url);
+public sealed record UpdateResolution(string AppId, string AppName, string PackageId, string Source,
+    string InstalledVersion, string TargetVersion, string Scope, string InstallerType,
+    string ElevationRequirement, IReadOnlyList<PackageAgreementInfo> Agreements);
+public sealed record UpdatePlan(Guid PlanId, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt,
+    UpdateResolution Resolution, string Digest);
+public sealed record UpdateApproval(Guid PlanId, string Digest, DateTimeOffset ApprovedAt,
+    bool AgreementsAccepted, string ApprovalToken);
+public sealed record ActionProgress(ActionProgressStage Stage, string Message,
+    ulong? BytesDownloaded = null, ulong? BytesRequired = null, double? DownloadPercent = null,
+    double? InstallPercent = null, bool CanCancel = true);
+public sealed record ActionResult(ActionStatus Status, string Subject, string Message,
+    int? InstallerErrorCode = null, bool RestartRequired = false, DateTimeOffset? CompletedAt = null);
+public sealed record ActionRecord(Guid Id, ActionKind Kind, string Subject, ActionStatus Status,
+    DateTimeOffset StartedAt, DateTimeOffset? CompletedAt = null, string? Summary = null,
+    int? ErrorCode = null, string? DetailsJson = null);
+
+public static class PlanDigests
+{
+    public static string Compute<T>(T value)
+        => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value)));
+
+    public static bool Equals(string left, string right)
+    {
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(left), Convert.FromHexString(right));
+        }
+        catch (FormatException) { return false; }
+    }
 }
 public interface IInventoryProvider
 {
@@ -28,9 +61,14 @@ public interface IUpdateProvider
 {
     Task<UpdateResult> CheckAsync(IReadOnlyList<InstalledApp> apps, CancellationToken cancellationToken);
 }
+public interface IUpdateResolver
+{
+    Task<UpdateResolution> ResolveAsync(InstalledApp app, CancellationToken cancellationToken);
+}
 public interface IUpdateExecutor
 {
-    Task<UpdateActionResult> ExecuteAsync(UpdateRequest request, InstalledApp app, CancellationToken cancellationToken);
+    Task<ActionResult> ExecuteAsync(UpdatePlan plan, IProgress<ActionProgress>? progress,
+        CancellationToken cancellationToken);
 }
 public interface IDashboardStore
 {
@@ -42,6 +80,13 @@ public interface IDashboardStore
     Task AddCategoryAsync(string name);
     Task RenameCategoryAsync(string oldName, string newName);
     Task AssignAsync(string appId, string category);
+}
+public interface IActionStore
+{
+    Task StartActionAsync(ActionRecord record, CancellationToken ct = default);
+    Task CompleteActionAsync(Guid id, ActionResult result, CancellationToken ct = default);
+    Task<IReadOnlyList<ActionRecord>> RecentActionsAsync(CancellationToken ct = default);
+    Task MarkInterruptedAsync(CancellationToken ct = default);
 }
 public static class Categories
 {
