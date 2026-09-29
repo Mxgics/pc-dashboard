@@ -3,9 +3,9 @@ using System.Text.Json;
 
 namespace PcDashboard.Core;
 
-public sealed class SqliteDashboardStore : IDashboardStore, IActionStore
+public sealed class SqliteDashboardStore : IDashboardStore, IActionStore, ISetupProfileStore
 {
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
     private readonly string connectionString;
     public SqliteDashboardStore(string path)
     {
@@ -29,7 +29,16 @@ public sealed class SqliteDashboardStore : IDashboardStore, IActionStore
                 id TEXT PRIMARY KEY, kind TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL,
                 started_at TEXT NOT NULL, completed_at TEXT, summary TEXT, error_code INTEGER, details_json TEXT);
             CREATE INDEX IF NOT EXISTS ix_action_history_started ON action_history(started_at DESC);
-            PRAGMA user_version=2;
+            CREATE TABLE IF NOT EXISTS setup_profiles (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE);
+            CREATE TABLE IF NOT EXISTS setup_profile_items (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL REFERENCES setup_profiles(id) ON DELETE CASCADE,
+                package_id TEXT NOT NULL, source TEXT NOT NULL, scope TEXT NOT NULL,
+                UNIQUE(profile_id, package_id, source, scope));
+            CREATE INDEX IF NOT EXISTS ix_setup_profile_items_profile
+                ON setup_profile_items(profile_id);
+            PRAGMA user_version=3;
             """;
         cmd.ExecuteNonQuery();
         transaction.Commit();
@@ -168,6 +177,103 @@ public sealed class SqliteDashboardStore : IDashboardStore, IActionStore
             """;
         cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<SetupProfile>> SetupProfilesAsync(
+        CancellationToken ct = default)
+    {
+        using var db = Open();
+        var result = new List<SetupProfile>();
+        using var profiles = db.CreateCommand();
+        profiles.CommandText = "SELECT id,name FROM setup_profiles ORDER BY name,id";
+        using var reader = await profiles.ExecuteReaderAsync(ct);
+        var headers = new List<(Guid Id, string Name)>();
+        while (await reader.ReadAsync(ct))
+            headers.Add((Guid.Parse(reader.GetString(0)), reader.GetString(1)));
+        await reader.DisposeAsync();
+
+        foreach (var header in headers)
+        {
+            using var items = db.CreateCommand();
+            items.CommandText = """
+                SELECT id,package_id,source,scope FROM setup_profile_items
+                WHERE profile_id=$profile ORDER BY rowid
+                """;
+            items.Parameters.AddWithValue("$profile", header.Id.ToString("D"));
+            using var itemReader = await items.ExecuteReaderAsync(ct);
+            var profileItems = new List<SetupProfileItem>();
+            while (await itemReader.ReadAsync(ct))
+                profileItems.Add(new(Guid.Parse(itemReader.GetString(0)),
+                    itemReader.GetString(1), itemReader.GetString(2), itemReader.GetString(3)));
+            result.Add(new(header.Id, header.Name, profileItems));
+        }
+        return result;
+    }
+
+    public async Task SaveSetupProfileAsync(SetupProfile profile,
+        CancellationToken ct = default)
+    {
+        ValidateProfile(profile);
+        using var db = Open();
+        using var transaction = db.BeginTransaction();
+        using (var save = db.CreateCommand())
+        {
+            save.Transaction = transaction;
+            save.CommandText = """
+                INSERT INTO setup_profiles(id,name) VALUES($id,$name)
+                ON CONFLICT(id) DO UPDATE SET name=excluded.name;
+                DELETE FROM setup_profile_items WHERE profile_id=$id;
+                """;
+            save.Parameters.AddWithValue("$id", profile.Id.ToString("D"));
+            save.Parameters.AddWithValue("$name", profile.Name.Trim());
+            await save.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var item in profile.Items)
+        {
+            using var saveItem = db.CreateCommand();
+            saveItem.Transaction = transaction;
+            saveItem.CommandText = """
+                INSERT INTO setup_profile_items(id,profile_id,package_id,source,scope)
+                VALUES($id,$profile,$package,$source,$scope)
+                """;
+            saveItem.Parameters.AddWithValue("$id", item.Id.ToString("D"));
+            saveItem.Parameters.AddWithValue("$profile", profile.Id.ToString("D"));
+            saveItem.Parameters.AddWithValue("$package", item.PackageId);
+            saveItem.Parameters.AddWithValue("$source", item.Source);
+            saveItem.Parameters.AddWithValue("$scope", item.Scope);
+            await saveItem.ExecuteNonQueryAsync(ct);
+        }
+        ct.ThrowIfCancellationRequested();
+        transaction.Commit();
+    }
+
+    public async Task DeleteSetupProfileAsync(Guid id, CancellationToken ct = default)
+    {
+        using var db = Open(); using var cmd = db.CreateCommand();
+        cmd.CommandText = "DELETE FROM setup_profiles WHERE id=$id";
+        cmd.Parameters.AddWithValue("$id", id.ToString("D"));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static void ValidateProfile(SetupProfile profile)
+    {
+        var name = profile.Name.Trim();
+        if (name.Length is < 1 or > 80 || name.Any(char.IsControl))
+            throw new ArgumentException("Use a profile name of 1–80 characters without control characters.");
+        if (profile.Items.Count > 500)
+            throw new ArgumentException("A setup profile can contain at most 500 packages.");
+        if (profile.Items.Select(item => item.Id).Distinct().Count() != profile.Items.Count)
+            throw new ArgumentException("Setup item identifiers must be unique.");
+        if (profile.Items.Select(item => (item.PackageId.ToUpperInvariant(),
+                item.Source.ToUpperInvariant(), item.Scope)).Distinct().Count() != profile.Items.Count)
+            throw new ArgumentException("A profile cannot contain the same package, source, and scope twice.");
+        foreach (var item in profile.Items)
+        {
+            if (item.PackageId.Length is < 1 or > 200 || item.PackageId.Any(char.IsControl)
+                || item.Source.Length is < 1 or > 200 || item.Source.Any(char.IsControl)
+                || item.Scope is not ("User" or "Machine"))
+                throw new ArgumentException("A setup item has an invalid package, source, or exact scope.");
+        }
     }
 
     private static string Bound(string value, int max)

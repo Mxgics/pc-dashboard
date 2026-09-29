@@ -2,7 +2,7 @@
 
 ## Automated
 
-Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 29 September 2026, 58 checks passed: the V1 identity, privacy, persistence, failure, cancellation and category cases plus V2 immutable plans, digest tampering, deterministic expiry, agreement acceptance, execution-time drift, action persistence/retention, startup interruption recovery, newer-schema rejection, refresh/mutation exclusion, native terminal/cancellation mapping, mandatory terminal refresh, verified success and `SucceededUnverified` fallback.
+Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 29 September 2026, 68 checks passed: the V1 identity, privacy, persistence, failure, cancellation and category cases; the V2 immutable-plan, execution and recovery cases; and V3 schema-3 profile CRUD, all four preview classifications, exact-scope rejection, agreement gating, immediate revalidation, drift rejection and restart-required sequence stop.
 
 Serialized Release solution build (`dotnet build PcDashboard.slnx -c Release --no-restore -m:1`) passed with zero errors. NuGet vulnerability lookup remains unverified because the service was unavailable and emitted NU1900 warnings.
 
@@ -19,6 +19,13 @@ The structured WinGet execution adapter compiles against the pinned 1.29.290 COM
 - The accessibility tree exposed the dialog name, review heading, complete definition-list metadata, UAC/cancellation copy, agreement heading, a named checkbox, Cancel, and a disabled Approve action. Initial focus landed on the review heading.
 - Source/behavior review confirms Cancel and Escape restore the originating row action after render; approval moves focus to the global operation heading; agreement acceptance gates approval; refresh/review controls are disabled during conflicting states; and one live global card carries progress, cancellation and restart messages.
 - Actual native keyboard traversal, Escape/focus restoration, screen-reader announcements and responsive resizing remain unverified because the available UI automation could not inspect the WPF WebView. These are release gates, not inferred passes.
+
+## V3 setup-profile evidence
+
+- Release compilation covers the profile editor, exact-scope package selection, review modal and shared global-operation integration. A representative fixture using the shipped CSS was reviewed at desktop and 420-pixel widths: the modal remained bounded and scrollable, metadata stacked, the sticky actions remained available, and the background was inert.
+- Behavioral checks use a deterministic provider to prove agreement rejection, immediate second resolution, drift rejection, one-at-a-time execution, restart-required stopping, and transactional SQLite profile round trips/deletion.
+- Code review confirms profile search cannot execute, only `User` and `Machine` scopes persist, blocked items disable UI approval, complete resolution/agreement data is displayed, and the existing native executor disables effective cancellation after installation begins.
+- The browser accessibility tree exposed only the modal while open, with its name, focused heading, complete per-package metadata, agreements, named checkbox and disabled approval action. Native create/edit/delete/search, modal keyboard/focus/screen-reader behavior and narrow-window layout remain unverified. No WinGet install or update was invoked on the host. User/machine scope, UAC, update, cancellation, failure, drift and restart-required journeys remain disposable-VM release gates.
 
 ## UI and release checklist
 

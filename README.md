@@ -2,7 +2,7 @@
 
 A local Windows desktop dashboard for understanding installed applications, versions, available updates, and personal categories.
 
-The app runs as the current Windows user and stores its latest snapshot locally. V2 adds a per-application **Review update** flow: it shows the exact resolved package, source, versions, scope, installer, elevation and agreements before a five-minute approval can invoke the structured WinGet executor. No uninstall, unattended change, automatic retry, rollback or automatic reboot is provided.
+The app runs as the current Windows user and stores its latest snapshot locally. V2 adds a per-application **Review update** flow. V3 setup profiles save exact package/source/scope choices and show a fresh `Current`/`Install`/`Update`/`Blocked` plan before a five-minute approval can run packages sequentially. No uninstall, unattended change, automatic retry, rollback or automatic reboot is provided.
 
 ## Build and verify
 
@@ -18,7 +18,7 @@ Package locally with `powershell -NoProfile -File scripts/Publish.ps1`, then lau
 
 [Project context](docs/PROJECT-CONTEXT.md) · [Project plan](docs/PROJECT-PLAN.md) · [Architecture decisions](docs/ADRS.md) · [Runbook](docs/RUNBOOK.md) · [Test evidence](docs/TEST-PLAN.md) · [Change notes](docs/CHANGE-NOTES.md)
 
-V2 approved updates are implemented but not release-promoted: disposable-VM execution, native accessibility and final public-release gates remain. V3 cleanup/setup/backups remain roadmap only. The app has no telemetry backend; WinGet and WebView2 retain their own diagnostics policies and global settings.
+V2 approved updates and the V3 setup-profile layer are implemented but not release-promoted: disposable-VM execution, native accessibility and final public-release gates remain. V3 cleanup and encrypted backup/restore remain roadmap only. The app has no telemetry backend; WinGet and WebView2 retain their own diagnostics policies and global settings.
 
 ## Privacy
 
