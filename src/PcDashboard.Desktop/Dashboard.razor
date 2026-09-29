@@ -1,23 +1,51 @@
 @implements IAsyncDisposable
 @inject DashboardService Data
 @inject IDashboardStore Store
+@inject UpdateService Updates
+@inject IJSRuntime JS
 
 <main>
     <header>
-        <div><p class="eyebrow">YOUR WINDOWS WORKSPACE</p><h1>PC Dashboard<span class="version">V1 · READ ONLY</span></h1><p class="subtitle">Know what’s installed. See what needs a closer look.</p></div>
-        <div class="actions"><button class="primary" disabled="@Data.IsRefreshing" @onclick="Refresh">@(Data.IsRefreshing ? "Refreshing…" : "Refresh now")</button>@if (Data.IsRefreshing) { <button @onclick="Data.Cancel">Cancel</button> }</div>
+        <div><p class="eyebrow">YOUR WINDOWS WORKSPACE</p><h1>PC Dashboard<span class="version">V2 · APPROVED UPDATES</span></h1><p class="subtitle">Know what’s installed. Review every change before it runs.</p></div>
+        <div class="actions"><button class="primary" disabled="@RefreshDisabled" @onclick="Refresh">@(Data.IsRefreshing ? "Refreshing…" : "Refresh now")</button>@if (Data.IsRefreshing) { <button @onclick="Data.Cancel">Cancel refresh</button> }</div>
     </header>
     <div role="status" aria-live="polite" class="statusline">@message @if (Data.IsRefreshing) { <span>Checking your PC. You can keep browsing cached results.</span> } else { <span>Local data · Checks run only while this window is open</span> }</div>
     @if (Data.Error is not null) { <p class="notice" role="alert">@Data.Error</p> }
     @foreach (var source in Data.Snapshot.Health.Where(s => !s.Success))
     { <p class="notice" role="status"><strong>@source.Source unavailable.</strong> Cached results are retained where available. @source.Error</p> }
+
+    @if (actionProgress is not null || actionResult is not null)
+    {
+        <section class="operation-card @ResultClass" aria-labelledby="operation-heading">
+            <div class="operation-copy" role="status" aria-live="polite">
+                <p class="eyebrow">GLOBAL OPERATION</p>
+                <h2 id="operation-heading" tabindex="-1">@(actionResult is null ? $"Updating {actionSubject}" : $"Update result: {actionSubject}")</h2>
+                <p>@(actionResult?.Message ?? actionProgress?.Message)</p>
+                @if (actionProgress?.DownloadPercent is { } download)
+                { <label>Download progress <progress max="100" value="@Math.Clamp(download, 0, 100)">@download.ToString("0")%</progress></label> }
+                @if (actionProgress?.InstallPercent is { } install)
+                { <label>Installer progress <progress max="100" value="@Math.Clamp(install, 0, 100)">@install.ToString("0")%</progress></label> }
+                @if (actionResult?.RestartRequired == true)
+                { <p class="restart"><strong>Restart required.</strong> Save your work and restart Windows when you are ready. PC Dashboard will never restart automatically.</p> }
+                else if (actionResult is null && actionProgress?.CanCancel == false)
+                { <p class="operation-note">The installer has started. Cancellation is disabled because stopping now cannot reliably undo the change.</p> }
+            </div>
+            <div class="actions">
+                @if (actionResult is null)
+                { <button disabled="@(actionProgress?.CanCancel != true)" @onclick="CancelUpdate">Cancel update</button> }
+                else
+                { <button @onclick="DismissResult">Dismiss</button> }
+            </div>
+        </section>
+    }
+
     <section class="stats" aria-label="Inventory summary">
         <article><span>Installed entries</span><strong>@Data.Snapshot.Apps.Count</strong><small>Desktop &amp; packaged apps</small></article>
         <article class="accent"><span>Updates reported</span><strong>@Data.Snapshot.Apps.Count(a => a.Update?.Status == UpdateStatus.Available)</strong><small>Based on source evidence</small></article>
         <article><span>Needs verification</span><strong>@Data.Snapshot.Apps.Count(a => a.Update is null || a.Update.Status is UpdateStatus.Unknown or UpdateStatus.Unsupported or UpdateStatus.Failed)</strong><small>Unknown or uncovered apps</small></article>
         <article><span>Categories</span><strong>@categories.Count</strong><small>Your organization, your rules</small></article>
     </section>
-    <section class="inventory" aria-labelledby="inventory-heading">
+    <section class="inventory" aria-labelledby="inventory-heading" aria-busy="@(Data.IsRefreshing || ActionInProgress)">
         <div class="section-title"><h2 id="inventory-heading">Applications</h2><span>@Filtered.Count() entries shown</span></div>
         <div class="filters">
             <label class="search">Search apps<input type="search" placeholder="Name, publisher or version" @bind="query" @bind:event="oninput" /></label>
@@ -25,64 +53,93 @@
             <label>Update status<select @bind="statusFilter"><option value="">All statuses</option>@foreach (var status in Enum.GetValues<UpdateStatus>()) { <option value="@status">@Label(status)</option> }</select></label>
             <label>Sort by<select @bind="sort"><option value="name">Name A–Z</option><option value="name-desc">Name Z–A</option><option value="publisher">Publisher</option><option value="status">Update status</option></select></label>
         </div>
-        <div class="table-wrap"><table><caption class="sr-only">Installed applications and source-reported update status</caption><thead><tr><th scope="col">Application</th><th scope="col">Installed version</th><th scope="col">Category</th><th scope="col">Update evidence</th><th scope="col">Details</th></tr></thead><tbody>
+        <div class="table-wrap"><table><caption class="sr-only">Installed applications, source-reported update status and reviewed update actions</caption><thead><tr><th scope="col">Application</th><th scope="col">Installed version</th><th scope="col">Category</th><th scope="col">Update evidence</th><th scope="col">Details</th><th scope="col">Action</th></tr></thead><tbody>
         @foreach (var app in Filtered)
         {
-            <tr @key="app.Id"><td><strong>@app.Name</strong><small>@(string.IsNullOrWhiteSpace(app.Publisher) ? "Publisher not supplied" : app.Publisher)</small></td><td class="mono">@(app.Version ?? "Not supplied")<small>@app.Scope · @app.Architecture</small></td><td><select aria-label="@($"Category for {app.Name}")" value="@Category(app)" @onchange="e => Assign(app.Id, e.Value?.ToString() ?? string.Empty)">@foreach (var category in categories) { <option>@category</option> }</select></td><td><span class="badge @((app.Update?.Status ?? UpdateStatus.Unknown).ToString().ToLowerInvariant())">@Label(app.Update?.Status ?? UpdateStatus.Unknown)</span><small>@Freshness(app)</small></td><td><button aria-label="@($"View details for {app.Name}")" @onclick="() => selectedId = selectedId == app.Id ? null : app.Id" aria-expanded="@(selectedId == app.Id)">@(selectedId == app.Id ? "Close" : "View")</button></td></tr>
+            var reviewId = ReviewButtonId(app);
+            <tr @key="app.Id"><td><strong>@app.Name</strong><small>@(string.IsNullOrWhiteSpace(app.Publisher) ? "Publisher not supplied" : app.Publisher)</small></td><td class="mono">@(app.Version ?? "Not supplied")<small>@app.Scope · @app.Architecture</small></td><td><select aria-label="@($"Category for {app.Name}")" value="@Category(app)" @onchange="e => Assign(app.Id, e.Value?.ToString() ?? string.Empty)">@foreach (var category in categories) { <option>@category</option> }</select></td><td><span class="badge @((app.Update?.Status ?? UpdateStatus.Unknown).ToString().ToLowerInvariant())">@Label(app.Update?.Status ?? UpdateStatus.Unknown)</span><small>@Freshness(app)</small></td><td><button aria-label="@($"View details for {app.Name}")" @onclick="() => selectedId = selectedId == app.Id ? null : app.Id" aria-expanded="@(selectedId == app.Id)">@(selectedId == app.Id ? "Close" : "View")</button></td><td class="action-cell">@if (app.Update?.Status == UpdateStatus.Available) { <button id="@reviewId" class="review" aria-label="@($"Review update for {app.Name}")" disabled="@(ReviewDisabled || preparingId == app.Id)" @onclick="() => ReviewUpdate(app, reviewId)">@(preparingId == app.Id ? "Resolving…" : "Review update")</button> } else { <span class="muted">No action</span> }</td></tr>
             @if (selectedId == app.Id)
-            { <tr class="detail"><td colspan="5"><h3>@app.Name — evidence</h3><dl><dt>Inventory identity</dt><dd>@app.NativeId</dd><dt>Inventory source</dt><dd>@app.Source</dd><dt>Observed</dt><dd>@app.ObservedAt.ToLocalTime().ToString("g")</dd><dt>Update source / package</dt><dd>@(app.Update?.Source ?? "Not checked") / @(app.Update?.PackageId ?? "Not matched")</dd><dt>Source version offered</dt><dd>@(app.Update?.AvailableVersion ?? "Not supplied")</dd><dt>Last update check</dt><dd>@(app.Update?.CheckedAt?.ToLocalTime().ToString("g") ?? "No successful check")</dd><dt>Pin information</dt><dd>@(app.Update?.Pin ?? "Not exposed")</dd></dl><p>@(app.Update?.Note ?? "An update check has not yet established evidence for this app.")</p></td></tr> }
+            { <tr class="detail"><td colspan="6"><h3>@app.Name — evidence</h3><dl><dt>Inventory identity</dt><dd>@app.NativeId</dd><dt>Inventory source</dt><dd>@app.Source</dd><dt>Observed</dt><dd>@app.ObservedAt.ToLocalTime().ToString("g")</dd><dt>Update source / package</dt><dd>@(app.Update?.Source ?? "Not checked") / @(app.Update?.PackageId ?? "Not matched")</dd><dt>Source version offered</dt><dd>@(app.Update?.AvailableVersion ?? "Not supplied")</dd><dt>Last update check</dt><dd>@(app.Update?.CheckedAt?.ToLocalTime().ToString("g") ?? "No successful check")</dd><dt>Pin information</dt><dd>@(app.Update?.Pin ?? "Not exposed")</dd></dl><p>@(app.Update?.Note ?? "An update check has not yet established evidence for this app.")</p></td></tr> }
         }
         </tbody></table></div>
         @if (!Filtered.Any()) { <div class="empty"><h3>@(Data.Snapshot.Apps.Count == 0 ? "No inventory yet" : "No matching applications")</h3><p>@(Data.Snapshot.Apps.Count == 0 ? "Refresh to read installed applications. Source failures will be shown above." : "Try a different search or clear your filters.")</p></div> }
     </section>
     <details class="category-editor"><summary>Manage categories</summary><p>Suggestions are a starting point. Your assignments survive refreshes.</p><div class="filters"><label>New category<input maxlength="40" @bind="newCategory" /></label><button @onclick="AddCategory">Create category</button><label>Rename category<select @bind="renameFrom"><option value="">Choose category</option>@foreach (var category in categories) { <option>@category</option> }</select></label><label>New name<input maxlength="40" @bind="renameTo" /></label><button @onclick="RenameCategory">Rename</button></div></details>
-    <footer><p>“None reported” means the checked sources did not report an update. It does not guarantee the latest publisher release.</p><p>No software is changed. V2: approved updates · V3: cleanup, setup &amp; backups.</p></footer>
+    <footer><p>“None reported” means the checked sources did not report an update. It does not guarantee the latest publisher release.</p><p>Updates require a fresh five-minute plan and explicit approval. No uninstall, automatic retry, rollback or automatic reboot is performed.</p></footer>
 </main>
+
+@if (reviewPlan is not null)
+{
+    var resolution = reviewPlan.Resolution;
+    <dialog @ref="reviewDialog" class="review-dialog" aria-labelledby="review-title" aria-describedby="review-summary" @oncancel="CancelReview" @oncancel:preventDefault>
+        <div class="dialog-header"><div><p class="eyebrow">REVIEW REQUIRED</p><h2 id="review-title" tabindex="-1">Update @resolution.AppName</h2></div><button class="icon-button" aria-label="Close update review" @onclick="CancelReview">×</button></div>
+        <p id="review-summary">Confirm the exact package details below. This approval expires at <strong>@reviewPlan.ExpiresAt.ToLocalTime().ToString("t")</strong>.</p>
+        @if (reviewError is not null) { <p class="notice" role="alert">@reviewError</p> }
+        <dl class="review-metadata">
+            <dt>Application</dt><dd>@resolution.AppName</dd><dt>Inventory identity</dt><dd class="mono">@resolution.AppId</dd><dt>Package ID</dt><dd class="mono">@resolution.PackageId</dd><dt>Source</dt><dd>@resolution.Source</dd><dt>Version change</dt><dd><span class="mono">@resolution.InstalledVersion</span> → <strong class="mono">@resolution.TargetVersion</strong></dd><dt>Install scope</dt><dd>@resolution.Scope</dd><dt>Installer</dt><dd>@resolution.InstallerType</dd><dt>Elevation</dt><dd>@resolution.ElevationRequirement</dd>
+        </dl>
+        @if (resolution.Scope == "Machine" || !resolution.ElevationRequirement.Contains("Prohibited", StringComparison.OrdinalIgnoreCase))
+        { <p class="uac-note"><strong>Windows permission prompt:</strong> this update may show UAC. Read the Windows prompt before allowing it.</p> }
+        <p class="operation-note">You may cancel while WinGet is queued or downloading. Once the installer starts, cancellation is disabled. PC Dashboard never restarts Windows automatically.</p>
+        <section class="agreements" aria-labelledby="agreements-title">
+            <h3 id="agreements-title">Package agreements</h3>
+            @if (resolution.Agreements.Count == 0)
+            { <p>No package agreements were supplied by WinGet.</p> }
+            else
+            {
+                @foreach (var agreement in resolution.Agreements)
+                { <article><h4>@(string.IsNullOrWhiteSpace(agreement.Label) ? "Package agreement" : agreement.Label)</h4>@if (!string.IsNullOrWhiteSpace(agreement.Text)) { <p>@agreement.Text</p> }@if (!string.IsNullOrWhiteSpace(agreement.Url)) { <p><span class="muted">Agreement URL:</span> <span class="mono wrap">@agreement.Url</span></p> }</article> }
+                <label class="agreement-check"><input type="checkbox" @bind="agreementsAccepted" /> I have reviewed and accept the package agreements shown above.</label>
+            }
+        </section>
+        <div class="dialog-actions"><button id="cancel-update-review" @onclick="CancelReview">Cancel</button><button class="primary" disabled="@ApprovalDisabled" @onclick="ApproveUpdate">Approve and update</button></div>
+    </dialog>
+}
 
 @code {
     private string query = "", categoryFilter = "", statusFilter = "", sort = "name", newCategory = "", renameFrom = "", renameTo = "";
-    private string? selectedId, message;
+    private string? selectedId, message, preparingId, returnFocusId, focusAfterRenderId, reviewError, actionSubject;
     private IReadOnlyList<string> categories = Categories.Defaults;
     private IReadOnlyDictionary<string, string> assignments = new Dictionary<string, string>();
     private IReadOnlyDictionary<string, string> aliases = new Dictionary<string, string>();
     private readonly CancellationTokenSource lifetime = new();
+    private CancellationTokenSource? actionCancellation;
     private Task? timerTask;
+    private UpdatePlan? reviewPlan;
+    private InstalledApp? reviewApp;
+    private ActionProgress? actionProgress;
+    private ActionResult? actionResult;
+    private ElementReference reviewDialog;
+    private bool agreementsAccepted, openDialogAfterRender;
+    private bool ActionInProgress => actionResult is null && actionProgress is not null;
+    private bool ReviewDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null;
+    private bool RefreshDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null;
+    private bool ApprovalDisabled => reviewPlan is null || ActionInProgress || reviewPlan.Resolution.Agreements.Count > 0 && !agreementsAccepted;
+    private string ResultClass => actionResult?.Status switch { ActionStatus.Succeeded => "success", ActionStatus.RestartRequired => "restart-required", ActionStatus.Failed or ActionStatus.Interrupted => "error", ActionStatus.Cancelled or ActionStatus.Rejected or ActionStatus.SucceededUnverified => "warning", _ => "active" };
     private IEnumerable<InstalledApp> Filtered {
         get {
-            var rows = Data.Snapshot.Apps.Where(a => string.IsNullOrEmpty(query) || $"{a.Name} {a.Publisher} {a.Version}".Contains(query, StringComparison.OrdinalIgnoreCase))
-                .Where(a => categoryFilter == "" || Category(a) == categoryFilter)
-                .Where(a => statusFilter == "" || (a.Update?.Status ?? UpdateStatus.Unknown).ToString() == statusFilter);
+            var rows = Data.Snapshot.Apps.Where(a => string.IsNullOrEmpty(query) || $"{a.Name} {a.Publisher} {a.Version}".Contains(query, StringComparison.OrdinalIgnoreCase)).Where(a => categoryFilter == "" || Category(a) == categoryFilter).Where(a => statusFilter == "" || (a.Update?.Status ?? UpdateStatus.Unknown).ToString() == statusFilter);
             return sort switch { "name-desc" => rows.OrderByDescending(a => a.Name), "publisher" => rows.OrderBy(a => a.Publisher).ThenBy(a => a.Name), "status" => rows.OrderBy(a => a.Update?.Status ?? UpdateStatus.Unknown).ThenBy(a => a.Name), _ => rows.OrderBy(a => a.Name) };
         }
     }
     private string Category(InstalledApp app) => assignments.GetValueOrDefault(app.Id) ?? aliases.GetValueOrDefault(Categories.Suggest(app)) ?? "Uncategorized";
     private static string Label(UpdateStatus status) => status switch { UpdateStatus.NoneReported => "None reported", _ => status.ToString() };
-    private string Freshness(InstalledApp app) {
-        if (app.Update?.CheckedAt is not { } date) return "Not checked successfully";
-        var failed = Data.Snapshot.Health.Any(h => h.Source == "WinGet" && !h.Success && h.AttemptedAt > date);
-        return failed ? "Cached · latest check failed" : DateTimeOffset.UtcNow - date >= TimeSpan.FromHours(24) ? "Stale · refresh needed" : $"Checked {date.ToLocalTime():g}";
-    }
-    protected override async Task OnInitializedAsync() {
-        Data.Changed += OnChanged;
-        try { await LoadCategories(); await Data.LoadAsync(); }
-        catch (Exception ex) { message = $"Local data could not be loaded: {ex.Message}"; return; }
-        timerTask = RunAsync();
-    }
-    private async Task RunAsync() {
-        try {
-            await Data.RefreshAsync(ct: lifetime.Token);
-            using var timer = new PeriodicTimer(TimeSpan.FromMinutes(15));
-            var ticks = 0;
-            while (await timer.WaitForNextTickAsync(lifetime.Token)) {
-                ticks++; await Data.RefreshAsync(ct: lifetime.Token, checkUpdates: ticks % 4 == 0);
-            }
-        } catch (OperationCanceledException) { }
-    }
+    private static string ReviewButtonId(InstalledApp app) => $"review-{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(app.Id)))[..12].ToLowerInvariant()}";
+    private string Freshness(InstalledApp app) { if (app.Update?.CheckedAt is not { } date) return "Not checked successfully"; var failed = Data.Snapshot.Health.Any(h => h.Source == "WinGet" && !h.Success && h.AttemptedAt > date); return failed ? "Cached · latest check failed" : DateTimeOffset.UtcNow - date >= TimeSpan.FromHours(24) ? "Stale · refresh needed" : $"Checked {date.ToLocalTime():g}"; }
+    protected override async Task OnInitializedAsync() { Data.Changed += OnChanged; try { await LoadCategories(); await Data.LoadAsync(); } catch (Exception ex) { message = $"Local data could not be loaded: {ex.Message}"; return; } timerTask = RunAsync(); }
+    protected override async Task OnAfterRenderAsync(bool firstRender) { if (openDialogAfterRender) { openDialogAfterRender = false; await JS.InvokeVoidAsync("pcDashboard.showModal", reviewDialog, "review-title"); } if (focusAfterRenderId is not null) { var id = focusAfterRenderId; focusAfterRenderId = null; await JS.InvokeVoidAsync("pcDashboard.focusById", id); } }
+    private async Task RunAsync() { try { if (!RefreshDisabled) await Data.RefreshAsync(ct: lifetime.Token); using var timer = new PeriodicTimer(TimeSpan.FromMinutes(15)); var ticks = 0; while (await timer.WaitForNextTickAsync(lifetime.Token)) { ticks++; if (!RefreshDisabled) await Data.RefreshAsync(ct: lifetime.Token, checkUpdates: ticks % 4 == 0); } } catch (OperationCanceledException) { } }
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
     private Task Refresh() => Data.RefreshAsync(forceUpdates: true, ct: lifetime.Token);
+    private async Task ReviewUpdate(InstalledApp app, string focusId) { if (ReviewDisabled) return; preparingId = app.Id; returnFocusId = focusId; message = null; reviewError = null; try { reviewPlan = await Updates.PrepareAsync(app, lifetime.Token); reviewApp = app; agreementsAccepted = false; openDialogAfterRender = true; } catch (OperationCanceledException) { message = "Update review was cancelled."; } catch (Exception ex) { message = $"Could not prepare this update: {ex.Message}"; } finally { preparingId = null; } }
+    private async Task ApproveUpdate() { if (reviewPlan is null || reviewApp is null || ApprovalDisabled) return; if (DateTimeOffset.UtcNow > reviewPlan.ExpiresAt) { reviewError = "This approval expired. Close the dialog and review the update again."; return; } var plan = reviewPlan; var app = reviewApp; var approval = new UpdateApproval(plan.PlanId, plan.Digest, DateTimeOffset.UtcNow, agreementsAccepted, Guid.NewGuid().ToString("N")); actionSubject = plan.Resolution.AppName; actionProgress = new(ActionProgressStage.Queued, "Waiting to start the approved update."); actionResult = null; actionCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); await CloseReview("operation-heading"); var progress = new Progress<ActionProgress>(value => { actionProgress = value; _ = InvokeAsync(StateHasChanged); }); try { actionResult = await Updates.ExecuteApprovedAsync(plan, approval, app, progress, actionCancellation.Token); } catch (Exception ex) { actionResult = new(ActionStatus.Failed, plan.Resolution.AppName, $"Update failed: {ex.Message}", CompletedAt: DateTimeOffset.UtcNow); } finally { actionCancellation.Dispose(); actionCancellation = null; await InvokeAsync(StateHasChanged); } }
+    private Task CancelReview() => CloseReview(returnFocusId);
+    private async Task CloseReview(string? nextFocusId) { if (reviewPlan is null) return; await JS.InvokeVoidAsync("pcDashboard.closeModal", reviewDialog); reviewPlan = null; reviewApp = null; reviewError = null; agreementsAccepted = false; focusAfterRenderId = nextFocusId; }
+    private void CancelUpdate() { if (actionProgress?.CanCancel == true) actionCancellation?.Cancel(); }
+    private void DismissResult() { actionResult = null; actionProgress = null; actionSubject = null; }
     private async Task LoadCategories() { categories = await Store.CategoriesAsync(); assignments = await Store.AssignmentsAsync(); aliases = await Store.CategoryAliasesAsync(); }
     private async Task Assign(string id, string category) { try { await Store.AssignAsync(id, category); await LoadCategories(); message = "Category saved."; } catch (Exception ex) { message = ex.Message; } }
     private async Task AddCategory() { try { await Store.AddCategoryAsync(newCategory); newCategory = ""; await LoadCategories(); message = "Category created."; } catch (Exception ex) { message = $"Could not create category: {ex.Message}"; } }
     private async Task RenameCategory() { try { await Store.RenameCategoryAsync(renameFrom, renameTo); categoryFilter = ""; renameFrom = renameTo = ""; await LoadCategories(); message = "Category renamed."; } catch (Exception ex) { message = $"Could not rename category: {ex.Message}"; } }
-    public async ValueTask DisposeAsync() { Data.Changed -= OnChanged; lifetime.Cancel(); Data.Cancel(); if (timerTask is not null) await timerTask; lifetime.Dispose(); }
+    public async ValueTask DisposeAsync() { Data.Changed -= OnChanged; lifetime.Cancel(); actionCancellation?.Cancel(); Data.Cancel(); if (timerTask is not null) await timerTask; actionCancellation?.Dispose(); lifetime.Dispose(); }
 }

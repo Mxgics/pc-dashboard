@@ -12,6 +12,14 @@ Native provider verification previously covered registry and packaged inventory 
 
 The structured WinGet execution adapter compiles against the pinned 1.29.290 COM package. Code review confirms exact source/package/version/scope options, hash-mismatch prohibition, structured progress, cancellation gating at installation start, native outcome mapping and post-terminal refresh. No real package was changed on the host. User-scope, machine-scope/UAC, cancellation, installer failure, restart-required and uncertain interruption scenarios remain unverified pending a user-authorized disposable Windows VM.
 
+## V2 approval UI evidence
+
+- Release compilation passed and the built WPF process remained responsive during a hidden startup smoke test. No update action was invoked.
+- A representative browser fixture using the shipped CSS and approval markup was inspected at desktop and 420-pixel widths. The dialog remained bounded/scrollable, metadata stacked at narrow width, actions stayed available in a sticky footer, and the background was inert.
+- The accessibility tree exposed the dialog name, review heading, complete definition-list metadata, UAC/cancellation copy, agreement heading, a named checkbox, Cancel, and a disabled Approve action. Initial focus landed on the review heading.
+- Source/behavior review confirms Cancel and Escape restore the originating row action after render; approval moves focus to the global operation heading; agreement acceptance gates approval; refresh/review controls are disabled during conflicting states; and one live global card carries progress, cancellation and restart messages.
+- Actual native keyboard traversal, Escape/focus restoration, screen-reader announcements and responsive resizing remain unverified because the available UI automation could not inspect the WPF WebView. These are release gates, not inferred passes.
+
 ## UI and release checklist
 
 - Verified in the packaged release: native launch and refresh, visible focus indicator, keyboard search replacement, no-match empty state, text search results, update-status filtering, available-update count, and expandable evidence details.

@@ -50,3 +50,10 @@ Verification: Release compilation and 26 behavioral checks passed. Earlier nativ
 - Change: add a structured `Microsoft.Management.Deployment` adapter that resolves one exact source/package/version/scope, rechecks installer/elevation/agreement details, reports progress, forwards cancellation only before installation, maps native outcomes, and always requests fresh inventory after an invoked terminal result. Register the resolver, executor, verifier and update service while keeping the UI read-only.
 - Safety: no shell command, retry, rollback, automatic reboot or unattended trigger exists. Native success becomes `SucceededUnverified` when fresh inventory cannot confirm the target version.
 - Verification: locked restore and serialized Release build passed; 58 behavioral checks passed. NU1900 remained because vulnerability data was unavailable. No host software was changed; disposable-VM execution and approval UI checks remain unverified.
+
+## 2026-09-29 — V2 explicit approval UI
+
+- Problem: registered execution services had no user-reachable approval surface, progress ownership, agreement gate or accessible focus lifecycle.
+- Change: add per-row **Review update**, a native modal containing the complete frozen plan, separate agreement acceptance, UAC/cancellation/restart guidance, one global progress/result card, and disabled conflicting refresh/review controls. Cancel/Escape returns focus to the row; approval moves it to the operation heading.
+- Responsive/accessibility: preserve table scrolling, stack dialog metadata/actions at 560 pixels, respect reduced motion, use native modal focus containment, labelled controls and polite status announcements.
+- Verification: locked restore and serialized Release build passed; the existing 58 behavioral checks remained green. A hidden WPF startup smoke stayed responsive. Representative desktop/420-pixel browser and accessibility-tree review passed. Native keyboard/screen-reader testing and all real update outcomes remain unverified pending the disposable VM; no host software was changed.
