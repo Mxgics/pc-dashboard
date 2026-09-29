@@ -2,7 +2,7 @@
 
 ## Current state
 
-V1 is implemented and release-verified as a personal Windows desktop application. It uses .NET 10, WPF and Blazor Hybrid with SQLite for the latest inventory snapshot and category preferences. V2 now has an immutable-plan boundary, shared operation coordinator, schema 2 action recovery, structured WinGet resolution/execution/verification services and an explicit per-row approval UI. The app still exposes no uninstall, web server, account, background service, telemetry backend or unattended software change.
+V1 is implemented and release-verified as a personal Windows desktop application. It uses .NET 10, WPF and Blazor Hybrid with SQLite for the latest inventory snapshot and category preferences. V2 has an immutable-plan boundary, shared operation coordinator, schema 2 action recovery, structured WinGet resolution/execution/verification services and an explicit per-row approval UI. The V3 setup layer adds schema 3 profile CRUD, source-qualified package search, exact-scope previews, explicit approval and sequential revalidated execution. The app still exposes no uninstall, web server, account, background service, telemetry backend or unattended software change.
 
 The packaged framework-dependent release was verified at `artifacts/win-x64/PcDashboard.Desktop.exe`, with its adjacent dependencies and README. It requires Windows 11 x64 build 26100+, .NET 10 Desktop Runtime and WebView2. No administrator rights are required.
 
@@ -17,6 +17,6 @@ The packaged framework-dependent release was verified at `artifacts/win-x64/PcDa
 
 Historical behavioral, native provider and packaged UI checks covered launch, refresh, keyboard search, filtering, empty state and evidence expansion. Current verification and limitations are recorded in TEST-PLAN.md. Personal machine evidence is not retained in public documentation.
 
-A representative browser review covered the real styles and approval markup at desktop and 420-pixel widths, including modal isolation, accessible names, initial heading focus and responsive stacking. The Release WPF build also passed a hidden startup/responding smoke test. A native keyboard/screen-reader pass, long-duration timer soak and disposable-VM execution scenarios remain unverified. V3 cleanup/setup/backups remain incomplete and are not authorization to change software.
+A representative browser review covered the V2 styles and approval markup at desktop and 420-pixel widths, including modal isolation, accessible names, initial heading focus and responsive stacking. The Release WPF build also passed a hidden startup/responding smoke test. Native setup-profile UI checks and all disposable-VM setup journeys remain unverified; no host package was changed. V3 cleanup and encrypted backup/restore remain incomplete and are not authorization to perform those operations.
 
 See the [project plan](PROJECT-PLAN.md), [test evidence](TEST-PLAN.md), [change notes](CHANGE-NOTES.md) and [runbook](RUNBOOK.md) for detail.

@@ -1,0 +1,203 @@
+@implements IAsyncDisposable
+@inject SetupService Setup
+@inject IJSRuntime JS
+
+<section class="setup-profiles" aria-labelledby="setup-heading" aria-busy="@working">
+    <div class="section-title"><div><p class="eyebrow">V3 · REPEATABLE SETUP</p><h2 id="setup-heading">Setup profiles</h2></div><button disabled="@Disabled" @onclick="NewProfile">New profile</button></div>
+    <p>Save exact WinGet package, source, and scope choices. Every run shows a fresh plan and requires approval.</p>
+    @if (message is not null) { <p class="notice" role="status">@message</p> }
+
+    @if (profiles.Count == 0 && editing is null)
+    { <div class="empty"><h3>No setup profiles</h3><p>Create one to group packages for a reviewed, sequential setup.</p></div> }
+    else
+    {
+        <div class="profile-grid">
+            @foreach (var profile in profiles)
+            {
+                <article class="profile-card" @key="profile.Id">
+                    <div><h3>@profile.Name</h3><p>@profile.Items.Count package@(profile.Items.Count == 1 ? "" : "s")</p></div>
+                    @if (pendingDeleteId == profile.Id)
+                    {
+                        <div class="confirm-row" role="group" aria-label="Confirm profile deletion"><span>Delete this profile?</span><button @onclick="() => DeleteProfile(profile)">Delete</button><button @onclick="() => pendingDeleteId = null">Keep</button></div>
+                    }
+                    else
+                    {
+                        <div class="actions"><button disabled="@Disabled" @onclick="() => EditProfile(profile)">Edit</button><button disabled="@Disabled" @onclick="() => pendingDeleteId = profile.Id">Delete</button><button id="@ReviewId(profile)" class="primary" disabled="@(Disabled || working)" @onclick="() => ReviewProfile(profile)">Review setup</button></div>
+                    }
+                </article>
+            }
+        </div>
+    }
+
+    @if (editing is not null)
+    {
+        <form class="profile-editor" @onsubmit="SaveProfile" @onsubmit:preventDefault>
+            <div class="section-title"><h3>@(profiles.Any(profile => profile.Id == editing.Id) ? "Edit profile" : "New profile")</h3><button type="button" @onclick="CloseEditor">Close editor</button></div>
+            <label>Profile name<input maxlength="80" required @bind="editingName" /></label>
+            <div class="package-search">
+                <label>Find a package<input type="search" maxlength="100" placeholder="Package name" @bind="searchText" /></label>
+                <button type="button" disabled="@(Disabled || searching || string.IsNullOrWhiteSpace(searchText))" @onclick="Search">@(searching ? "Searching…" : "Search WinGet")</button>
+            </div>
+            @if (searchResults.Count > 0)
+            {
+                <div class="search-results" aria-label="Package search results">
+                    @foreach (var result in searchResults)
+                    {
+                        <article><div><strong>@result.Name</strong><small class="mono">@result.PackageId · @result.Source</small></div><div class="actions"><button type="button" @onclick="() => AddUserPackage(result)">Add for user</button><button type="button" @onclick="() => AddMachinePackage(result)">Add for machine</button></div></article>
+                    }
+                </div>
+            }
+            <h4>Selected packages</h4>
+            @if (editingItems.Count == 0) { <p class="muted">No packages selected.</p> }
+            else
+            {
+                <ul class="selected-packages">
+                    @foreach (var item in editingItems)
+                    { <li><span><strong class="mono">@item.PackageId</strong><small>@item.Source · @item.Scope scope</small></span><button type="button" aria-label="@($"Remove {item.PackageId}")" @onclick="() => RemovePackage(item.Id)">Remove</button></li> }
+                </ul>
+            }
+            <div class="actions"><button class="primary" type="submit" disabled="@(Disabled || working)">Save profile</button></div>
+        </form>
+    }
+</section>
+
+@if (reviewPlan is not null)
+{
+    <dialog @ref="reviewDialog" class="review-dialog setup-review" aria-labelledby="setup-review-title" aria-describedby="setup-review-summary" @oncancel="CancelReview" @oncancel:preventDefault>
+        <div class="dialog-header"><div><p class="eyebrow">PROFILE APPROVAL REQUIRED</p><h2 id="setup-review-title" tabindex="-1">Set up @reviewPlan.ProfileName</h2></div><button class="icon-button" aria-label="Close setup review" @onclick="CancelReview">×</button></div>
+        <p id="setup-review-summary">Review every resolved package. This plan expires at <strong>@reviewPlan.ExpiresAt.ToLocalTime().ToString("t")</strong> and runs sequentially.</p>
+        @if (reviewError is not null) { <p class="notice" role="alert">@reviewError</p> }
+        @if (reviewPlan.Items.Any(item => item.Disposition == SetupDisposition.Blocked))
+        { <p class="notice" role="alert">Blocked packages must be fixed or removed before this profile can run.</p> }
+        <div class="setup-plan">
+            @foreach (var item in reviewPlan.Items)
+            {
+                <article class="plan-item @item.Disposition.ToString().ToLowerInvariant()">
+                    <div class="plan-heading"><h3>@item.Name</h3><span class="badge">@item.Disposition</span></div>
+                    <dl class="review-metadata"><dt>Package ID</dt><dd class="mono">@item.Item.PackageId</dd><dt>Source</dt><dd>@item.Item.Source</dd><dt>Scope</dt><dd>@item.Item.Scope</dd><dt>Installed</dt><dd class="mono">@(item.InstalledVersion ?? "Not installed")</dd><dt>Target</dt><dd class="mono">@(item.TargetVersion ?? "Unavailable")</dd><dt>Installer</dt><dd>@item.InstallerType</dd><dt>Elevation</dt><dd>@item.ElevationRequirement</dd></dl>
+                    @if (item.Reason is not null) { <p class="notice">@item.Reason</p> }
+                    @if (item.Agreements.Count > 0)
+                    {
+                        <div class="agreements"><h4>Agreements</h4>@foreach (var agreement in item.Agreements) { <article><strong>@(string.IsNullOrWhiteSpace(agreement.Label) ? "Package agreement" : agreement.Label)</strong>@if (!string.IsNullOrWhiteSpace(agreement.Text)) { <p>@agreement.Text</p> }@if (!string.IsNullOrWhiteSpace(agreement.Url)) { <p class="mono wrap">@agreement.Url</p> }</article> }</div>
+                    }
+                </article>
+            }
+        </div>
+        <p class="operation-note">Each item is resolved again immediately before it runs. The sequence stops on cancellation, drift, failure, or restart requirement. Cancellation is disabled once an installer begins.</p>
+        @if (HasAgreements)
+        { <label class="agreement-check"><input type="checkbox" @bind="agreementsAccepted" /> I have reviewed and accept every package agreement shown above.</label> }
+        <div class="dialog-actions"><button @onclick="CancelReview">Cancel</button><button class="primary" disabled="@ApprovalDisabled" @onclick="Approve">Approve and run profile</button></div>
+    </dialog>
+}
+
+@code {
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<bool> InteractionChanged { get; set; }
+    [Parameter] public EventCallback<OperationViewState> OperationChanged { get; set; }
+    private readonly CancellationTokenSource lifetime = new();
+    private CancellationTokenSource? operationCancellation;
+    private List<SetupProfile> profiles = [];
+    private List<SetupProfileItem> editingItems = [];
+    private IReadOnlyList<PackageSearchResult> searchResults = [];
+    private SetupProfile? editing;
+    private SetupPlan? reviewPlan;
+    private ElementReference reviewDialog;
+    private Guid? pendingDeleteId;
+    private string editingName = "", searchText = "";
+    private string? message, reviewError, returnFocusId, focusAfterRenderId;
+    private bool searching, working, agreementsAccepted, openDialogAfterRender;
+    private bool HasAgreements => reviewPlan?.Items.SelectMany(item => item.Agreements).Any() == true;
+    private bool ApprovalDisabled => reviewPlan is null || working
+        || reviewPlan.Items.Any(item => item.Disposition == SetupDisposition.Blocked)
+        || HasAgreements && !agreementsAccepted;
+
+    protected override async Task OnInitializedAsync() => await LoadProfiles();
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (openDialogAfterRender)
+        {
+            openDialogAfterRender = false;
+            await JS.InvokeVoidAsync("pcDashboard.showModal", reviewDialog, "setup-review-title");
+        }
+        if (focusAfterRenderId is not null)
+        {
+            var id = focusAfterRenderId; focusAfterRenderId = null;
+            await JS.InvokeVoidAsync("pcDashboard.focusById", id);
+        }
+    }
+    private async Task LoadProfiles() => profiles = (await Setup.ProfilesAsync(lifetime.Token)).ToList();
+    private void NewProfile() { editing = new(Guid.NewGuid(), "", []); editingName = ""; editingItems = []; searchResults = []; message = null; }
+    private void EditProfile(SetupProfile profile) { editing = profile; editingName = profile.Name; editingItems = profile.Items.ToList(); searchResults = []; message = null; }
+    private void CloseEditor() { editing = null; editingItems = []; searchResults = []; }
+    private async Task Search()
+    {
+        searching = true; message = null;
+        try { searchResults = await Setup.SearchAsync(searchText, lifetime.Token); if (searchResults.Count == 0) message = "WinGet returned no matching packages."; }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { message = $"Package search failed: {ex.Message}"; }
+        finally { searching = false; }
+    }
+    private void AddPackage(PackageSearchResult result, string scope)
+    {
+        if (editingItems.Any(item => item.PackageId.Equals(result.PackageId, StringComparison.OrdinalIgnoreCase) && item.Source.Equals(result.Source, StringComparison.OrdinalIgnoreCase) && item.Scope == scope)) { message = "That exact package and scope is already selected."; return; }
+        editingItems.Add(new(Guid.NewGuid(), result.PackageId, result.Source, scope)); message = $"Added {result.Name} for {scope.ToLowerInvariant()} scope.";
+    }
+    private void AddUserPackage(PackageSearchResult result) => AddPackage(result, "User");
+    private void AddMachinePackage(PackageSearchResult result) => AddPackage(result, "Machine");
+    private void RemovePackage(Guid id) => editingItems.RemoveAll(item => item.Id == id);
+    private async Task SaveProfile()
+    {
+        if (editing is null) return;
+        working = true;
+        try { await Setup.SaveProfileAsync(new(editing.Id, editingName, editingItems.ToArray()), lifetime.Token); await LoadProfiles(); CloseEditor(); message = "Setup profile saved."; }
+        catch (Exception ex) { message = $"Could not save profile: {ex.Message}"; }
+        finally { working = false; }
+    }
+    private async Task DeleteProfile(SetupProfile profile)
+    {
+        working = true;
+        try { await Setup.DeleteProfileAsync(profile.Id, lifetime.Token); await LoadProfiles(); message = "Setup profile deleted."; }
+        catch (Exception ex) { message = $"Could not delete profile: {ex.Message}"; }
+        finally { pendingDeleteId = null; working = false; }
+    }
+    private async Task ReviewProfile(SetupProfile profile)
+    {
+        if (Disabled || working) return;
+        working = true; message = null; reviewError = null; returnFocusId = ReviewId(profile);
+        await InteractionChanged.InvokeAsync(true);
+        try { reviewPlan = await Setup.PrepareAsync(profile, lifetime.Token); agreementsAccepted = false; openDialogAfterRender = true; }
+        catch (Exception ex) { message = $"Could not prepare setup: {ex.Message}"; await InteractionChanged.InvokeAsync(false); }
+        finally { working = false; }
+    }
+    private async Task Approve()
+    {
+        if (reviewPlan is null || ApprovalDisabled) return;
+        if (DateTimeOffset.UtcNow > reviewPlan.ExpiresAt) { reviewError = "This setup plan expired. Close it and review the profile again."; return; }
+        var plan = reviewPlan;
+        var approval = new SetupApproval(plan.PlanId, plan.Digest, DateTimeOffset.UtcNow,
+            agreementsAccepted, Guid.NewGuid().ToString("N"));
+        operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        var initial = new ActionProgress(ActionProgressStage.Queued, "Waiting to start the approved setup.");
+        await CloseReview(null);
+        await OperationChanged.InvokeAsync(new(plan.ProfileName, "Setup", initial, null, Cancel));
+        var progress = new Progress<ActionProgress>(value =>
+            _ = InvokeAsync(() => OperationChanged.InvokeAsync(
+                new(plan.ProfileName, "Setup", value, null, Cancel))));
+        ActionResult result;
+        try { result = await Setup.ExecuteApprovedAsync(plan, approval, progress, operationCancellation.Token); }
+        catch (Exception ex) { result = new(ActionStatus.Failed, plan.ProfileName, $"Setup failed: {ex.Message}", CompletedAt: DateTimeOffset.UtcNow); }
+        finally { operationCancellation.Dispose(); operationCancellation = null; }
+        await OperationChanged.InvokeAsync(new(plan.ProfileName, "Setup", null, result, null));
+    }
+    private Task CancelReview() => CloseReview(returnFocusId);
+    private async Task CloseReview(string? focusId)
+    {
+        if (reviewPlan is null) return;
+        await JS.InvokeVoidAsync("pcDashboard.closeModal", reviewDialog);
+        reviewPlan = null; reviewError = null; agreementsAccepted = false; focusAfterRenderId = focusId;
+        await InteractionChanged.InvokeAsync(false);
+    }
+    private void Cancel() => operationCancellation?.Cancel();
+    private static string ReviewId(SetupProfile profile) => $"review-setup-{profile.Id:N}";
+    public ValueTask DisposeAsync() { lifetime.Cancel(); operationCancellation?.Cancel(); operationCancellation?.Dispose(); lifetime.Dispose(); return ValueTask.CompletedTask; }
+}

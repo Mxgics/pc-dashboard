@@ -19,7 +19,7 @@
         <section class="operation-card @ResultClass" aria-labelledby="operation-heading">
             <div class="operation-copy" role="status" aria-live="polite">
                 <p class="eyebrow">GLOBAL OPERATION</p>
-                <h2 id="operation-heading" tabindex="-1">@(actionResult is null ? $"Updating {actionSubject}" : $"Update result: {actionSubject}")</h2>
+                <h2 id="operation-heading" tabindex="-1">@(actionResult is null ? $"{actionVerb}: {actionSubject}" : $"{actionVerb} result: {actionSubject}")</h2>
                 <p>@(actionResult?.Message ?? actionProgress?.Message)</p>
                 @if (actionProgress?.DownloadPercent is { } download)
                 { <label>Download progress <progress max="100" value="@Math.Clamp(download, 0, 100)">@download.ToString("0")%</progress></label> }
@@ -32,7 +32,7 @@
             </div>
             <div class="actions">
                 @if (actionResult is null)
-                { <button disabled="@(actionProgress?.CanCancel != true)" @onclick="CancelUpdate">Cancel update</button> }
+                { <button disabled="@(actionProgress?.CanCancel != true)" @onclick="CancelOperation">Cancel @actionVerb.ToLowerInvariant()</button> }
                 else
                 { <button @onclick="DismissResult">Dismiss</button> }
             </div>
@@ -64,6 +64,7 @@
         </tbody></table></div>
         @if (!Filtered.Any()) { <div class="empty"><h3>@(Data.Snapshot.Apps.Count == 0 ? "No inventory yet" : "No matching applications")</h3><p>@(Data.Snapshot.Apps.Count == 0 ? "Refresh to read installed applications. Source failures will be shown above." : "Try a different search or clear your filters.")</p></div> }
     </section>
+    <SetupProfiles Disabled="@(RefreshDisabled || reviewPlan is not null)" InteractionChanged="OnSetupInteraction" OperationChanged="OnSetupOperation" />
     <details class="category-editor"><summary>Manage categories</summary><p>Suggestions are a starting point. Your assignments survive refreshes.</p><div class="filters"><label>New category<input maxlength="40" @bind="newCategory" /></label><button @onclick="AddCategory">Create category</button><label>Rename category<select @bind="renameFrom"><option value="">Choose category</option>@foreach (var category in categories) { <option>@category</option> }</select></label><label>New name<input maxlength="40" @bind="renameTo" /></label><button @onclick="RenameCategory">Rename</button></div></details>
     <footer><p>“None reported” means the checked sources did not report an update. It does not guarantee the latest publisher release.</p><p>Updates require a fresh five-minute plan and explicit approval. No uninstall, automatic retry, rollback or automatic reboot is performed.</p></footer>
 </main>
@@ -99,6 +100,8 @@
 @code {
     private string query = "", categoryFilter = "", statusFilter = "", sort = "name", newCategory = "", renameFrom = "", renameTo = "";
     private string? selectedId, message, preparingId, returnFocusId, focusAfterRenderId, reviewError, actionSubject;
+    private string actionVerb = "Update";
+    private Action? cancelOperation;
     private IReadOnlyList<string> categories = Categories.Defaults;
     private IReadOnlyDictionary<string, string> assignments = new Dictionary<string, string>();
     private IReadOnlyDictionary<string, string> aliases = new Dictionary<string, string>();
@@ -110,10 +113,10 @@
     private ActionProgress? actionProgress;
     private ActionResult? actionResult;
     private ElementReference reviewDialog;
-    private bool agreementsAccepted, openDialogAfterRender;
+    private bool agreementsAccepted, openDialogAfterRender, setupInteraction;
     private bool ActionInProgress => actionResult is null && actionProgress is not null;
-    private bool ReviewDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null;
-    private bool RefreshDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null;
+    private bool ReviewDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null || setupInteraction;
+    private bool RefreshDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null || setupInteraction;
     private bool ApprovalDisabled => reviewPlan is null || ActionInProgress || reviewPlan.Resolution.Agreements.Count > 0 && !agreementsAccepted;
     private string ResultClass => actionResult?.Status switch { ActionStatus.Succeeded => "success", ActionStatus.RestartRequired => "restart-required", ActionStatus.Failed or ActionStatus.Interrupted => "error", ActionStatus.Cancelled or ActionStatus.Rejected or ActionStatus.SucceededUnverified => "warning", _ => "active" };
     private IEnumerable<InstalledApp> Filtered {
@@ -132,11 +135,21 @@
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
     private Task Refresh() => Data.RefreshAsync(forceUpdates: true, ct: lifetime.Token);
     private async Task ReviewUpdate(InstalledApp app, string focusId) { if (ReviewDisabled) return; preparingId = app.Id; returnFocusId = focusId; message = null; reviewError = null; try { reviewPlan = await Updates.PrepareAsync(app, lifetime.Token); reviewApp = app; agreementsAccepted = false; openDialogAfterRender = true; } catch (OperationCanceledException) { message = "Update review was cancelled."; } catch (Exception ex) { message = $"Could not prepare this update: {ex.Message}"; } finally { preparingId = null; } }
-    private async Task ApproveUpdate() { if (reviewPlan is null || reviewApp is null || ApprovalDisabled) return; if (DateTimeOffset.UtcNow > reviewPlan.ExpiresAt) { reviewError = "This approval expired. Close the dialog and review the update again."; return; } var plan = reviewPlan; var app = reviewApp; var approval = new UpdateApproval(plan.PlanId, plan.Digest, DateTimeOffset.UtcNow, agreementsAccepted, Guid.NewGuid().ToString("N")); actionSubject = plan.Resolution.AppName; actionProgress = new(ActionProgressStage.Queued, "Waiting to start the approved update."); actionResult = null; actionCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); await CloseReview("operation-heading"); var progress = new Progress<ActionProgress>(value => { actionProgress = value; _ = InvokeAsync(StateHasChanged); }); try { actionResult = await Updates.ExecuteApprovedAsync(plan, approval, app, progress, actionCancellation.Token); } catch (Exception ex) { actionResult = new(ActionStatus.Failed, plan.Resolution.AppName, $"Update failed: {ex.Message}", CompletedAt: DateTimeOffset.UtcNow); } finally { actionCancellation.Dispose(); actionCancellation = null; await InvokeAsync(StateHasChanged); } }
+    private async Task ApproveUpdate() { if (reviewPlan is null || reviewApp is null || ApprovalDisabled) return; if (DateTimeOffset.UtcNow > reviewPlan.ExpiresAt) { reviewError = "This approval expired. Close the dialog and review the update again."; return; } var plan = reviewPlan; var app = reviewApp; var approval = new UpdateApproval(plan.PlanId, plan.Digest, DateTimeOffset.UtcNow, agreementsAccepted, Guid.NewGuid().ToString("N")); actionSubject = plan.Resolution.AppName; actionVerb = "Update"; actionProgress = new(ActionProgressStage.Queued, "Waiting to start the approved update."); actionResult = null; actionCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); cancelOperation = CancelUpdate; await CloseReview("operation-heading"); var progress = new Progress<ActionProgress>(value => { actionProgress = value; _ = InvokeAsync(StateHasChanged); }); try { actionResult = await Updates.ExecuteApprovedAsync(plan, approval, app, progress, actionCancellation.Token); } catch (Exception ex) { actionResult = new(ActionStatus.Failed, plan.Resolution.AppName, $"Update failed: {ex.Message}", CompletedAt: DateTimeOffset.UtcNow); } finally { actionCancellation.Dispose(); actionCancellation = null; cancelOperation = null; await InvokeAsync(StateHasChanged); } }
     private Task CancelReview() => CloseReview(returnFocusId);
     private async Task CloseReview(string? nextFocusId) { if (reviewPlan is null) return; await JS.InvokeVoidAsync("pcDashboard.closeModal", reviewDialog); reviewPlan = null; reviewApp = null; reviewError = null; agreementsAccepted = false; focusAfterRenderId = nextFocusId; }
     private void CancelUpdate() { if (actionProgress?.CanCancel == true) actionCancellation?.Cancel(); }
-    private void DismissResult() { actionResult = null; actionProgress = null; actionSubject = null; }
+    private void CancelOperation() { if (actionProgress?.CanCancel == true) cancelOperation?.Invoke(); }
+    private void DismissResult() { actionResult = null; actionProgress = null; actionSubject = null; cancelOperation = null; }
+    private Task OnSetupInteraction(bool active) { setupInteraction = active; return InvokeAsync(StateHasChanged); }
+    private Task OnSetupOperation(OperationViewState state)
+    {
+        actionSubject = state.Subject; actionVerb = state.Verb; actionProgress = state.Progress;
+        actionResult = state.Result; cancelOperation = state.Cancel;
+        if (state.Progress?.Message == "Waiting to start the approved setup.")
+            focusAfterRenderId = "operation-heading";
+        return InvokeAsync(StateHasChanged);
+    }
     private async Task LoadCategories() { categories = await Store.CategoriesAsync(); assignments = await Store.AssignmentsAsync(); aliases = await Store.CategoryAliasesAsync(); }
     private async Task Assign(string id, string category) { try { await Store.AssignAsync(id, category); await LoadCategories(); message = "Category saved."; } catch (Exception ex) { message = ex.Message; } }
     private async Task AddCategory() { try { await Store.AddCategoryAsync(newCategory); newCategory = ""; await LoadCategories(); message = "Category created."; } catch (Exception ex) { message = $"Could not create category: {ex.Message}"; } }

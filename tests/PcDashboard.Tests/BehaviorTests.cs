@@ -134,6 +134,74 @@ internal static class BehaviorTests
             && await sharedGate.TryBeginRefreshAsync() is null,
             "An update mutation excludes refreshes");
         await mutationLease!.DisposeAsync();
+
+        var setupItem = new SetupProfileItem(Guid.NewGuid(), "Vendor.Tool", "winget", "User");
+        var setupResolved = new SetupPlanItem(setupItem, "Tool", null, "2.0",
+            SetupDisposition.Install, "Exe", "ElevationProhibited",
+            [new("Terms", "Review these terms", "https://example.invalid/setup")]);
+        var setupProvider = new RecordingSetupProvider(setupResolved);
+        var setupProfiles = new RecordingProfileStore();
+        var setupActions = new RecordingActionStore();
+        var setupService = new SetupService(setupProvider, setupProfiles, setupActions,
+            new OperationCoordinator(), clock);
+        var setupProfile = new SetupProfile(Guid.NewGuid(), "Developer tools", [setupItem]);
+        await setupService.SaveProfileAsync(setupProfile);
+        Check((await setupService.ProfilesAsync()).Single() == setupProfile,
+            "Setup profile CRUD preserves exact package, source, and scope");
+        var setupPlan = await setupService.PrepareAsync(setupProfile);
+        Check(setupPlan.Items.Single().Disposition == SetupDisposition.Install,
+            "Setup preview classifies a missing package as Install");
+        var currentItem = new SetupProfileItem(Guid.NewGuid(), "Vendor.Current", "winget", "User");
+        var updateItem = new SetupProfileItem(Guid.NewGuid(), "Vendor.Update", "winget", "Machine");
+        var blockedItem = new SetupProfileItem(Guid.NewGuid(), "Vendor.Blocked", "winget", "User");
+        var classificationProvider = new RecordingSetupProvider(setupResolved);
+        classificationProvider.Resolutions[currentItem.Id] = new(currentItem, "Current", "1.0", "1.0",
+            SetupDisposition.Current, "Exe", "ElevationProhibited", []);
+        classificationProvider.Resolutions[updateItem.Id] = new(updateItem, "Update", "1.0", "2.0",
+            SetupDisposition.Update, "Msi", "ElevationRequired", []);
+        classificationProvider.Resolutions[blockedItem.Id] = new(blockedItem, "Blocked", null, null,
+            SetupDisposition.Blocked, "Unavailable", "Unknown", [], "Source unavailable");
+        var classificationService = new SetupService(classificationProvider, setupProfiles,
+            new RecordingActionStore(), new OperationCoordinator(), clock);
+        var classificationPlan = await classificationService.PrepareAsync(new(Guid.NewGuid(),
+            "Classification", [setupItem, currentItem, updateItem, blockedItem]));
+        Check(classificationPlan.Items.Select(item => item.Disposition).SequenceEqual(
+                [SetupDisposition.Install, SetupDisposition.Current,
+                    SetupDisposition.Update, SetupDisposition.Blocked]),
+            "Setup preview preserves Current, Install, Update, and Blocked classifications");
+        var setupWithoutAgreement = await setupService.ExecuteApprovedAsync(setupPlan,
+            new(setupPlan.PlanId, setupPlan.Digest, now, false, "approved"));
+        Check(setupWithoutAgreement.Status == ActionStatus.Rejected && setupProvider.InstallCalls == 0,
+            "Setup agreements require separate acceptance");
+        var setupResult = await setupService.ExecuteApprovedAsync(setupPlan,
+            new(setupPlan.PlanId, setupPlan.Digest, now, true, "approved"));
+        Check(setupResult.Status == ActionStatus.Succeeded && setupProvider.ResolveCalls == 2
+            && setupProvider.InstallCalls == 1,
+            "Approved setup revalidates immediately before sequential execution");
+        setupProvider.Current = setupResolved with { TargetVersion = "2.1" };
+        var driftedSetup = await setupService.ExecuteApprovedAsync(setupPlan,
+            new(setupPlan.PlanId, setupPlan.Digest, now, true, "approved"));
+        Check(driftedSetup.Status == ActionStatus.Rejected && setupProvider.InstallCalls == 1,
+            "Setup stops before execution when package evidence drifts");
+        setupProvider.Current = setupResolved;
+        var secondItem = new SetupProfileItem(Guid.NewGuid(), "Vendor.Second", "winget", "Machine");
+        var restartProvider = new RecordingSetupProvider(setupResolved)
+        {
+            Result = new(ActionStatus.RestartRequired, "Tool", "Restart required",
+                RestartRequired: true, CompletedAt: now)
+        };
+        restartProvider.Resolutions[secondItem.Id] = new(secondItem, "Second", null, "1.0",
+            SetupDisposition.Install, "Msi", "ElevationRequired", []);
+        var restartService = new SetupService(restartProvider, setupProfiles,
+            new RecordingActionStore(), new OperationCoordinator(), clock);
+        var restartPlan = await restartService.PrepareAsync(
+            new(Guid.NewGuid(), "Restart profile", [setupItem, secondItem]));
+        var restartResult = await restartService.ExecuteApprovedAsync(restartPlan,
+            new(restartPlan.PlanId, restartPlan.Digest, now, true, "approved"));
+        Check(restartResult.Status == ActionStatus.RestartRequired
+            && restartProvider.InstallCalls == 1,
+            "Setup stops at the first restart-required result");
+
         var directory = Path.Combine(Path.GetTempPath(), "PcDashboard-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
@@ -176,7 +244,28 @@ internal static class BehaviorTests
             {
                 db.Open(); using var query = db.CreateCommand(); query.CommandText = "PRAGMA user_version";
                 Check(Convert.ToInt32(query.ExecuteScalar()) == SqliteDashboardStore.SchemaVersion,
-                    "V2 action history upgrades the database to schema 2");
+                    "Setup profiles upgrade the database to schema 3");
+            }
+            var storedProfile = new SetupProfile(Guid.NewGuid(), "Workstation",
+                [new(Guid.NewGuid(), "Vendor.Editor", "winget", "Machine")]);
+            await store.SaveSetupProfileAsync(storedProfile);
+            var roundTrippedProfile = (await store.SetupProfilesAsync()).Single();
+            Check(roundTrippedProfile.Id == storedProfile.Id
+                && roundTrippedProfile.Name == storedProfile.Name
+                && roundTrippedProfile.Items.SequenceEqual(storedProfile.Items),
+                "SQLite profile CRUD round-trips ordered exact package identity");
+            await store.DeleteSetupProfileAsync(storedProfile.Id);
+            Check((await store.SetupProfilesAsync()).Count == 0,
+                "Deleting a setup profile cascades to its package items");
+            try
+            {
+                await store.SaveSetupProfileAsync(new(Guid.NewGuid(), "Unsafe scope",
+                    [new(Guid.NewGuid(), "Vendor.Editor", "winget", "Any")]));
+                throw new Exception("Accepted an inexact scope");
+            }
+            catch (ArgumentException)
+            {
+                Check(true, "Setup profile persistence rejects an inexact package scope");
             }
             var unfinishedId = Guid.NewGuid();
             await store.StartActionAsync(new(unfinishedId, ActionKind.Update, "Interrupted example",
@@ -321,6 +410,50 @@ internal static class BehaviorTests
         public Task<IReadOnlyList<ActionRecord>> RecentActionsAsync(CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<ActionRecord>>(Records.ToArray());
         public Task MarkInterruptedAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+    private sealed class RecordingSetupProvider(SetupPlanItem current) : IPackageSetupProvider
+    {
+        public SetupPlanItem Current { get; set; } = current;
+        public Dictionary<Guid, SetupPlanItem> Resolutions { get; } = [];
+        public ActionResult Result { get; set; } = new(ActionStatus.Succeeded, "Setup",
+            "Installed", CompletedAt: DateTimeOffset.UtcNow);
+        public int ResolveCalls { get; private set; }
+        public int InstallCalls { get; private set; }
+        public Task<IReadOnlyList<PackageSearchResult>> SearchAsync(string query,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<PackageSearchResult>>(
+                [new(Current.Item.PackageId, Current.Name, Current.Item.Source)]);
+        public Task<SetupPlanItem> ResolveAsync(SetupProfileItem item,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ResolveCalls++;
+            return Task.FromResult(Resolutions.GetValueOrDefault(item.Id,
+                Current with { Item = item }));
+        }
+        public Task<ActionResult> InstallAsync(SetupPlanItem item, bool acceptAgreements,
+            IProgress<ActionProgress>? progress, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            InstallCalls++;
+            return Task.FromResult(Result with { Subject = item.Name });
+        }
+    }
+    private sealed class RecordingProfileStore : ISetupProfileStore
+    {
+        private readonly Dictionary<Guid, SetupProfile> profiles = [];
+        public Task<IReadOnlyList<SetupProfile>> SetupProfilesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<SetupProfile>>(profiles.Values.ToArray());
+        public Task SaveSetupProfileAsync(SetupProfile profile, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested(); profiles[profile.Id] = profile;
+            return Task.CompletedTask;
+        }
+        public Task DeleteSetupProfileAsync(Guid id, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested(); profiles.Remove(id);
+            return Task.CompletedTask;
+        }
     }
     private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
     {

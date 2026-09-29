@@ -37,8 +37,14 @@ Execution is constrained to one exact configured source, package ID, version and
 
 Do not promote this build for host use until user-scope, machine-scope/UAC, cancellation, failure and restart-required journeys pass in a user-authorized disposable Windows VM. Native keyboard and screen-reader checks also remain release gates. Inventory evidence never authorizes execution.
 
-## V3 — future only
+## V3 — setup profiles (release verification pending)
 
-No cleanup/setup/backup engine exists. Before release, document reviewed previews/exclusions, destinations/retention/encryption, tested restores, recovery limits and destructive-action approval. Protecting the dashboard's settings manually is not a PC backup feature.
+Create or edit a profile, search WinGet, then add a result for an exact user or machine scope. Saving changes only local configuration; it never installs software. Choose **Review setup** to resolve every saved item. Do not approve a plan until every `Install` or `Update` item has the expected package ID, source, scope, target, installer, elevation and agreements. `Current` items are skipped. `Blocked` items disable approval and must be fixed or removed.
+
+Approved items run sequentially through structured WinGet. Each item is resolved again immediately before it starts; any changed metadata rejects the plan. Cancellation can stop queued/download work and stops the sequence before the next item, but becomes ineffective after an installer begins. Failure, uncertain interruption and restart requirement also stop the sequence. Save work and restart manually when requested. There is no automatic retry, rollback or reboot. A machine-scope item may show UAC; verify the Windows prompt.
+
+Schema 3 stores profiles in `%LOCALAPPDATA%/PcDashboard/dashboard.db`. Preserve the entire closed-app data directory before manual recovery. Do not downgrade to a schema-2 binary after opening schema 3. Before release, verify create/edit/delete/search, plan review, keyboard/focus/screen-reader behavior, user-scope install, machine-scope/UAC, update, cancellation, drift, failure and restart-required stops in a user-authorized disposable VM. No real setup execution is permitted on the host as a substitute.
+
+V3 temporary cleanup and encrypted backup/restore are still future work. Protecting dashboard settings manually is not a PC backup feature.
 
 Legacy diagnostics.log is imported transactionally into legacy_diagnostics on startup, then removed. Failed imports preserve the original and stop startup with a generic error. Older probe reports must be explicitly imported using SqliteDiagnostics.ImportLegacyFile into a private database before removing them; there is no export or general migration CLI in the shipped app. Never publish those reports. Legacy records preserve complete evidence separately from the rolling 256 diagnostic entries (4,096 characters each). SQLite is not encrypted. WebView2 maintains its own browser profile outside SQLite; this is runtime-managed data, not application inventory storage.

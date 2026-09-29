@@ -4,9 +4,10 @@ using System.Text.Json;
 namespace PcDashboard.Core;
 
 public enum UpdateStatus { Unknown, Available, NoneReported, Unsupported, Failed }
-public enum ActionKind { Update }
+public enum ActionKind { Update, Setup }
 public enum ActionStatus { Planned, Rejected, Running, Succeeded, SucceededUnverified, Failed, Cancelled, RestartRequired, Interrupted }
 public enum ActionProgressStage { Queued, Downloading, Installing, PostInstall, Verifying, Completed }
+public enum SetupDisposition { Current, Install, Update, Blocked }
 public sealed record UpdateEvidence(UpdateStatus Status, string Source, string? PackageId = null,
     string? AvailableVersion = null, DateTimeOffset? CheckedAt = null, string? Note = null, string? Pin = null);
 public sealed record InstalledApp(string Id, string Name, string? Version, string? Publisher,
@@ -37,6 +38,19 @@ public sealed record UpdateVerification(bool Fresh, bool TargetVersionObserved, 
 public sealed record ActionRecord(Guid Id, ActionKind Kind, string Subject, ActionStatus Status,
     DateTimeOffset StartedAt, DateTimeOffset? CompletedAt = null, string? Summary = null,
     int? ErrorCode = null, string? DetailsJson = null);
+
+public sealed record SetupProfile(Guid Id, string Name, IReadOnlyList<SetupProfileItem> Items);
+public sealed record SetupProfileItem(Guid Id, string PackageId, string Source, string Scope);
+public sealed record PackageSearchResult(string PackageId, string Name, string Source);
+public sealed record SetupPlanItem(SetupProfileItem Item, string Name, string? InstalledVersion,
+    string? TargetVersion, SetupDisposition Disposition, string InstallerType,
+    string ElevationRequirement, IReadOnlyList<PackageAgreementInfo> Agreements,
+    string? Reason = null);
+public sealed record SetupPlan(Guid PlanId, Guid ProfileId, string ProfileName,
+    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, IReadOnlyList<SetupPlanItem> Items,
+    string Digest);
+public sealed record SetupApproval(Guid PlanId, string Digest, DateTimeOffset ApprovedAt,
+    bool AgreementsAccepted, string ApprovalToken);
 
 public static class PlanDigests
 {
@@ -100,6 +114,15 @@ public interface IUpdateVerifier
 {
     Task<UpdateVerification> RefreshAndVerifyAsync(UpdatePlan plan, CancellationToken cancellationToken);
 }
+public interface IPackageSetupProvider
+{
+    Task<IReadOnlyList<PackageSearchResult>> SearchAsync(string query,
+        CancellationToken cancellationToken);
+    Task<SetupPlanItem> ResolveAsync(SetupProfileItem item,
+        CancellationToken cancellationToken);
+    Task<ActionResult> InstallAsync(SetupPlanItem item, bool acceptAgreements,
+        IProgress<ActionProgress>? progress, CancellationToken cancellationToken);
+}
 public interface IDashboardStore
 {
     Task<Snapshot> LoadAsync(CancellationToken ct = default);
@@ -117,6 +140,12 @@ public interface IActionStore
     Task CompleteActionAsync(Guid id, ActionResult result, CancellationToken ct = default);
     Task<IReadOnlyList<ActionRecord>> RecentActionsAsync(CancellationToken ct = default);
     Task MarkInterruptedAsync(CancellationToken ct = default);
+}
+public interface ISetupProfileStore
+{
+    Task<IReadOnlyList<SetupProfile>> SetupProfilesAsync(CancellationToken ct = default);
+    Task SaveSetupProfileAsync(SetupProfile profile, CancellationToken ct = default);
+    Task DeleteSetupProfileAsync(Guid id, CancellationToken ct = default);
 }
 public static class Categories
 {

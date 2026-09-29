@@ -35,6 +35,7 @@ public partial class App : Application
             collection.AddSingleton(store);
             collection.AddSingleton<IDashboardStore>(store);
             collection.AddSingleton<IActionStore>(store);
+            collection.AddSingleton<ISetupProfileStore>(store);
             foreach (var provider in providers) collection.AddSingleton(provider);
             collection.AddSingleton<IUpdateProvider, WinGetUpdates>();
             collection.AddSingleton<OperationCoordinator>();
@@ -42,9 +43,11 @@ public partial class App : Application
             collection.AddSingleton<WinGetActions>();
             collection.AddSingleton<IUpdateResolver>(services => services.GetRequiredService<WinGetActions>());
             collection.AddSingleton<IUpdateExecutor>(services => services.GetRequiredService<WinGetActions>());
+            collection.AddSingleton<IPackageSetupProvider>(services => services.GetRequiredService<WinGetActions>());
             collection.AddSingleton<IUpdateVerifier, DashboardUpdateVerifier>();
             collection.AddSingleton(TimeProvider.System);
             collection.AddSingleton<UpdateService>();
+            collection.AddSingleton<SetupService>();
             services = collection.BuildServiceProvider();
             new MainWindow(services).Show();
         }
