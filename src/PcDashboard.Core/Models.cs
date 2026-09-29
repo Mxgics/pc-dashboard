@@ -33,6 +33,7 @@ public sealed record ActionProgress(ActionProgressStage Stage, string Message,
     double? InstallPercent = null, bool CanCancel = true);
 public sealed record ActionResult(ActionStatus Status, string Subject, string Message,
     int? InstallerErrorCode = null, bool RestartRequired = false, DateTimeOffset? CompletedAt = null);
+public sealed record UpdateVerification(bool Fresh, bool TargetVersionObserved, string Message);
 public sealed record ActionRecord(Guid Id, ActionKind Kind, string Subject, ActionStatus Status,
     DateTimeOffset StartedAt, DateTimeOffset? CompletedAt = null, string? Summary = null,
     int? ErrorCode = null, string? DetailsJson = null);
@@ -52,6 +53,31 @@ public static class PlanDigests
         catch (FormatException) { return false; }
     }
 }
+public static class UpdateExecutionResults
+{
+    public static ActionResult NativeTerminal(string subject, bool succeeded, bool restartRequired,
+        string nativeStatus, int? errorCode, DateTimeOffset completedAt)
+    {
+        if (succeeded)
+            return restartRequired
+                ? new(ActionStatus.RestartRequired, subject,
+                    "Installation completed and Windows reports that a restart is required.",
+                    errorCode, true, completedAt)
+                : new(ActionStatus.Succeeded, subject, "WinGet reported success.",
+                    CompletedAt: completedAt);
+        return new(ActionStatus.Failed, subject,
+            $"WinGet reported {nativeStatus}. No automatic retry or rollback was attempted.",
+            errorCode, CompletedAt: completedAt);
+    }
+
+    public static ActionResult Cancellation(string subject, bool installationStarted,
+        DateTimeOffset completedAt) => installationStarted
+        ? new(ActionStatus.Interrupted, subject,
+            "The WinGet operation ended after installation began; the final machine state is uncertain.",
+            CompletedAt: completedAt)
+        : new(ActionStatus.Cancelled, subject, "Update cancelled before installation.",
+            CompletedAt: completedAt);
+}
 public interface IInventoryProvider
 {
     string Source { get; }
@@ -69,6 +95,10 @@ public interface IUpdateExecutor
 {
     Task<ActionResult> ExecuteAsync(UpdatePlan plan, IProgress<ActionProgress>? progress,
         CancellationToken cancellationToken);
+}
+public interface IUpdateVerifier
+{
+    Task<UpdateVerification> RefreshAndVerifyAsync(UpdatePlan plan, CancellationToken cancellationToken);
 }
 public interface IDashboardStore
 {

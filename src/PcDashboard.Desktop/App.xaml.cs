@@ -39,6 +39,12 @@ public partial class App : Application
             collection.AddSingleton<IUpdateProvider, WinGetUpdates>();
             collection.AddSingleton<OperationCoordinator>();
             collection.AddSingleton<DashboardService>();
+            collection.AddSingleton<WinGetActions>();
+            collection.AddSingleton<IUpdateResolver>(services => services.GetRequiredService<WinGetActions>());
+            collection.AddSingleton<IUpdateExecutor>(services => services.GetRequiredService<WinGetActions>());
+            collection.AddSingleton<IUpdateVerifier, DashboardUpdateVerifier>();
+            collection.AddSingleton(TimeProvider.System);
+            collection.AddSingleton<UpdateService>();
             services = collection.BuildServiceProvider();
             new MainWindow(services).Show();
         }

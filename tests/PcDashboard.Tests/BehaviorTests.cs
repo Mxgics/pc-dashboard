@@ -22,19 +22,35 @@ internal static class BehaviorTests
         Check(Match(app, candidate with { UpdateAvailable = false }).Status == UpdateStatus.NoneReported, "Source false is none reported, not inferred latest");
         Check(Match(app, candidate).Pin == "Not exposed", "Unavailable pin metadata is explicit");
         Check(Match(app with { Source = "Windows packages", NativeId = "family" }, candidate with { FamilyNames = ["family"] }).Status == UpdateStatus.Available, "Packaged apps correlate on family identity");
+        Check(UpdateExecutionResults.NativeTerminal("Example", true, false, "Ok", null, now).Status
+            == ActionStatus.Succeeded, "Native success maps explicitly");
+        var restart = UpdateExecutionResults.NativeTerminal("Example", true, true, "Ok", 3010, now);
+        Check(restart.Status == ActionStatus.RestartRequired && restart.RestartRequired,
+            "Successful restart-required result stays distinct");
+        var installerFailure = UpdateExecutionResults.NativeTerminal("Example", false, true,
+            "InstallError", 1603, now);
+        Check(installerFailure.Status == ActionStatus.Failed && !installerFailure.RestartRequired
+            && installerFailure.InstallerErrorCode == 1603,
+            "Failed install is not mislabeled as completed restart-required");
+        Check(UpdateExecutionResults.Cancellation("Example", false, now).Status
+            == ActionStatus.Cancelled, "Pre-install cancellation is terminal cancelled");
+        Check(UpdateExecutionResults.Cancellation("Example", true, now).Status
+            == ActionStatus.Interrupted, "Post-install interruption reports uncertain state");
         var evidenced = app with { Update = new UpdateEvidence(UpdateStatus.Available, "winget", "Vendor.Example", "2.0", now) };
         var resolution = new UpdateResolution("a", "Example", "Vendor.Example", "winget", "1.0", "2.0",
             "User", "Exe", "ElevationProhibited", []);
         var resolver = new MutableResolver(resolution);
         var executor = new RecordingExecutor();
+        var verifier = new RecordingVerifier();
         var actionStore = new RecordingActionStore();
         var clock = new ManualTimeProvider(now);
-        var updateService = new UpdateService(resolver, executor, actionStore, new OperationCoordinator(), clock);
+        var updateService = new UpdateService(resolver, executor, verifier, actionStore,
+            new OperationCoordinator(), clock);
         var plan = await updateService.PrepareAsync(evidenced);
         var approved = new UpdateApproval(plan.PlanId, plan.Digest, now, true, "user-approved");
         var action = await updateService.ExecuteApprovedAsync(plan, approved, evidenced);
-        Check(action.Status == ActionStatus.Succeeded && executor.Calls == 1 && resolver.Calls == 2,
-            "Explicit immutable update plan is resolved again before execution");
+        Check(action.Status == ActionStatus.Succeeded && executor.Calls == 1 && resolver.Calls == 2
+            && verifier.Calls == 1, "Explicit update is resolved again and freshly verified");
         Check(actionStore.Records.Single().Status == ActionStatus.Succeeded,
             "Terminal update result is persisted");
         var tampered = await updateService.ExecuteApprovedAsync(plan with
@@ -66,9 +82,33 @@ internal static class BehaviorTests
         Check(drift.Status == ActionStatus.Rejected && executor.Calls == 1,
             "Execution-time resolution drift is rejected");
         resolver.Current = resolution;
+        var unavailableVerifier = new RecordingVerifier
+        {
+            Result = new(false, false, "Fresh verification was unavailable.")
+        };
+        var unverifiedService = new UpdateService(resolver, new RecordingExecutor(),
+            unavailableVerifier, new RecordingActionStore(), new OperationCoordinator(), clock);
+        var unverifiedPlan = await unverifiedService.PrepareAsync(evidenced);
+        var unverified = await unverifiedService.ExecuteApprovedAsync(unverifiedPlan,
+            new(unverifiedPlan.PlanId, unverifiedPlan.Digest, now, true, "user-approved"), evidenced);
+        Check(unverified.Status == ActionStatus.SucceededUnverified && unavailableVerifier.Calls == 1,
+            "Native success remains unverified when fresh inventory is unavailable");
+        var failedExecutor = new RecordingExecutor
+        {
+            Result = new(ActionStatus.Failed, "Example", "Installer failed", 1603,
+                CompletedAt: now)
+        };
+        var failureVerifier = new RecordingVerifier();
+        var failureService = new UpdateService(resolver, failedExecutor, failureVerifier,
+            new RecordingActionStore(), new OperationCoordinator(), clock);
+        var failurePlan = await failureService.PrepareAsync(evidenced);
+        var failed = await failureService.ExecuteApprovedAsync(failurePlan,
+            new(failurePlan.PlanId, failurePlan.Digest, now, true, "user-approved"), evidenced);
+        Check(failed.Status == ActionStatus.Failed && failed.InstallerErrorCode == 1603
+            && failureVerifier.Calls == 1, "Installer failure is preserved after mandatory refresh");
         var blockingExecutor = new BlockingExecutor();
-        var serializedUpdates = new UpdateService(resolver, blockingExecutor, new RecordingActionStore(),
-            new OperationCoordinator(), clock);
+        var serializedUpdates = new UpdateService(resolver, blockingExecutor, new RecordingVerifier(),
+            new RecordingActionStore(), new OperationCoordinator(), clock);
         var blockingPlan = await serializedUpdates.PrepareAsync(evidenced);
         var blockingApproval = new UpdateApproval(blockingPlan.PlanId, blockingPlan.Digest, now, true, "user-approved");
         var firstUpdate = serializedUpdates.ExecuteApprovedAsync(blockingPlan, blockingApproval, evidenced);
@@ -221,12 +261,25 @@ internal static class BehaviorTests
     private sealed class RecordingExecutor : IUpdateExecutor
     {
         public int Calls { get; private set; }
+        public ActionResult? Result { get; set; }
         public Task<ActionResult> ExecuteAsync(UpdatePlan plan, IProgress<ActionProgress>? progress,
             CancellationToken cancellationToken)
         {
             Calls++;
-            return Task.FromResult(new ActionResult(ActionStatus.Succeeded, plan.Resolution.AppName,
-                "Executed", CompletedAt: DateTimeOffset.UtcNow));
+            return Task.FromResult(Result ?? new ActionResult(ActionStatus.Succeeded,
+                plan.Resolution.AppName, "Executed", CompletedAt: DateTimeOffset.UtcNow));
+        }
+    }
+    private sealed class RecordingVerifier : IUpdateVerifier
+    {
+        public int Calls { get; private set; }
+        public UpdateVerification Result { get; set; }
+            = new(true, true, "Fresh inventory confirmed the target version.");
+        public Task<UpdateVerification> RefreshAndVerifyAsync(UpdatePlan plan,
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(Result);
         }
     }
     private sealed class BlockingExecutor : IUpdateExecutor

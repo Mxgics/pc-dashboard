@@ -2,13 +2,15 @@
 
 ## Automated
 
-Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 29 September 2026, 51 checks passed: the V1 identity, privacy, persistence, failure, cancellation and category cases plus V2 immutable plans, digest tampering, deterministic expiry, agreement acceptance, execution-time drift, action persistence/retention, startup interruption recovery, newer-schema rejection, and refresh/mutation exclusion.
+Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 29 September 2026, 58 checks passed: the V1 identity, privacy, persistence, failure, cancellation and category cases plus V2 immutable plans, digest tampering, deterministic expiry, agreement acceptance, execution-time drift, action persistence/retention, startup interruption recovery, newer-schema rejection, refresh/mutation exclusion, native terminal/cancellation mapping, mandatory terminal refresh, verified success and `SucceededUnverified` fallback.
 
 Serialized Release solution build (`dotnet build PcDashboard.slnx -c Release --no-restore -m:1`) passed with zero errors. NuGet vulnerability lookup remains unverified because the service was unavailable and emitted NU1900 warnings.
 
 ## Native provider evidence
 
 Native provider verification previously covered registry and packaged inventory plus structured WinGet evidence without elevation. Personal inventory counts and probe output are intentionally excluded.
+
+The structured WinGet execution adapter compiles against the pinned 1.29.290 COM package. Code review confirms exact source/package/version/scope options, hash-mismatch prohibition, structured progress, cancellation gating at installation start, native outcome mapping and post-terminal refresh. No real package was changed on the host. User-scope, machine-scope/UAC, cancellation, installer failure, restart-required and uncertain interruption scenarios remain unverified pending a user-authorized disposable Windows VM.
 
 ## UI and release checklist
 

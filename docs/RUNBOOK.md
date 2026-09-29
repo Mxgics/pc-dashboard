@@ -29,9 +29,11 @@ For startup failure, check runtime prerequisites, data permissions, disk space a
 
 Rollback: close the app and preserve its data and current release folder. Only run a previous complete release folder if it enforces the same SQLite-only privacy boundary. Never mix DLLs from releases. No third-party software changes occur.
 
-## V2 — foundation only
+## V2 — execution adapter, no action UI
 
-The immutable plan/approval contracts, schema 2 action history and shared refresh/mutation gate are implemented, but no resolver, executor or UI is registered and the application still cannot update software. Plans expire after five minutes and are rejected for tampering, changed identity/source/version/resolution, unaccepted agreements, or overlapping work. The most recent 100 action records are retained; a record left planned or running is marked interrupted when the store next opens. Before release, document and verify structured package execution, elevation, progress, cancellation limits, restart policy, partial failure and post-update inventory verification. Inventory evidence never authorizes execution.
+The immutable plan/approval contracts, schema 2 action history, shared refresh/mutation gate and structured WinGet resolver/executor/verifier are registered. The product UI exposes no action, so do not treat this layer as an update feature or attempt to invoke it manually. Plans expire after five minutes and are rejected for tampering, changed identity/source/version/resolution, unaccepted agreements, or overlapping work. The most recent 100 action records are retained; a record left planned or running is marked interrupted when the store next opens.
+
+Execution is constrained to one exact configured source, package ID, version and user/machine scope through the WinGet COM API. Queued/download cancellation prevents installation; cancellation is disabled once the installer starts because WinGet cannot stop or roll back that phase. The adapter never retries, rolls back or reboots automatically. Every terminal native result triggers inventory/update refresh, and native success remains `SucceededUnverified` unless fresh inventory confirms the target version. User-scope, machine-scope/UAC, cancellation, failure and restart-required journeys remain unverified until they are run in a user-authorized disposable Windows VM after the approval UI exists. Inventory evidence never authorizes execution.
 
 ## V3 — future only
 
