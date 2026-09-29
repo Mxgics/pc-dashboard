@@ -4,7 +4,7 @@ namespace PcDashboard.Core;
 
 /// <summary>Freezes reviewed package evidence and revalidates it before invoking an executor.</summary>
 public sealed class UpdateService(IUpdateResolver resolver, IUpdateExecutor executor,
-    IActionStore actions, OperationCoordinator operations, TimeProvider timeProvider)
+    IUpdateVerifier verifier, IActionStore actions, OperationCoordinator operations, TimeProvider timeProvider)
 {
     public static readonly TimeSpan ApprovalLifetime = TimeSpan.FromMinutes(5);
 
@@ -36,6 +36,7 @@ public sealed class UpdateService(IUpdateResolver resolver, IUpdateExecutor exec
 
         var actionId = Guid.NewGuid();
         var started = false;
+        var executorInvoked = false;
         ActionResult result;
         await using (lease)
         {
@@ -58,7 +59,10 @@ public sealed class UpdateService(IUpdateResolver resolver, IUpdateExecutor exec
                 if (!PlanDigests.Equals(PlanDigests.Compute(plan.Resolution), PlanDigests.Compute(live)))
                     result = Rejected(plan, "Package evidence changed after approval; review the update again.", timeProvider.GetUtcNow());
                 else
+                {
+                    executorInvoked = true;
                     result = await executor.ExecuteAsync(plan, progress, ct);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -72,9 +76,33 @@ public sealed class UpdateService(IUpdateResolver resolver, IUpdateExecutor exec
             }
         }
 
+        if (executorInvoked)
+            result = await VerifyTerminalAsync(plan, result);
         progress?.Report(new(ActionProgressStage.Completed, result.Message, CanCancel: false));
         if (started) await actions.CompleteActionAsync(actionId, result, CancellationToken.None);
         return result;
+    }
+
+    private async Task<ActionResult> VerifyTerminalAsync(UpdatePlan plan, ActionResult result)
+    {
+        UpdateVerification verification;
+        try
+        {
+            verification = await verifier.RefreshAndVerifyAsync(plan, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            verification = new(false, false, $"Fresh verification was unavailable: {ex.Message}");
+        }
+
+        if (result.Status != ActionStatus.Succeeded) return result;
+        return verification is { Fresh: true, TargetVersionObserved: true }
+            ? result with { Message = $"{result.Message} {verification.Message}" }
+            : result with
+            {
+                Status = ActionStatus.SucceededUnverified,
+                Message = $"{result.Message} {verification.Message}"
+            };
     }
 
     private static string? ValidateApproval(UpdatePlan plan, UpdateApproval approval,

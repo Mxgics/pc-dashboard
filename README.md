@@ -2,7 +2,7 @@
 
 A local Windows desktop dashboard for understanding installed applications, versions, available updates, and personal categories.
 
-The current UI is deliberately read-only. It runs as the current Windows user, stores its latest snapshot locally, and does not install, update, or remove software. V2's approval and execution contracts are being built behind that UI boundary; no update executor is registered yet.
+The current UI is deliberately read-only. It runs as the current Windows user, stores its latest snapshot locally, and exposes no install, update, or remove control. V2's approval boundary and structured WinGet resolver/executor are registered behind that UI boundary, but nothing can invoke them without the explicit approval UI planned for the next layer.
 
 ## Build and verify
 
@@ -18,7 +18,7 @@ Package locally with `powershell -NoProfile -File scripts/Publish.ps1`, then lau
 
 [Project context](docs/PROJECT-CONTEXT.md) · [Project plan](docs/PROJECT-PLAN.md) · [Architecture decisions](docs/ADRS.md) · [Runbook](docs/RUNBOOK.md) · [Test evidence](docs/TEST-PLAN.md) · [Change notes](docs/CHANGE-NOTES.md)
 
-V2 approved updates are in progress; only the guarded core boundary exists. V3 cleanup/setup/backups remain roadmap only. The app has no telemetry backend; WinGet and WebView2 retain their own diagnostics policies and global settings.
+V2 approved updates are in progress; the guarded core and structured execution adapter exist, while the approval UI is not implemented. V3 cleanup/setup/backups remain roadmap only. The app has no telemetry backend; WinGet and WebView2 retain their own diagnostics policies and global settings.
 
 ## Privacy
 

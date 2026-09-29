@@ -4,7 +4,7 @@
 
 Personal Windows desktop app: .NET 10, WPF and Blazor Hybrid. V1 is read-only inventory, versions, source-reported updates and editable categories. Local SQLite stores the latest snapshot and preferences. No accounts, hosting, HTTP server, telemetry backend, startup item or background service. Hardware/process monitoring, portable scanning, SDK-specific adapters and launcher libraries are excluded. Software already registered in Windows can appear, including games and SDKs.
 
-## Current phase: V2 approved updates — core boundary in progress
+## Current phase: V2 approved updates — approval UI pending
 
 1. **Project foundation — complete.** SDK/direct packages pinned with transitive lockfiles. Follow CONTRIBUTING for branch and release workflow.
 2. **Provider feasibility — complete.** Both registry views, current-user packages and structured WinGet queries verified without elevation. Shared HKCU registrations are deduplicated; side-by-side identities remain separate. WinGet System maps to Machine scope. Acceptance: exact native identities and explicit failure/unknown states.
@@ -17,7 +17,7 @@ Cached startup; inventory on launch/every 15 minutes while open; hourly freshnes
 
 ## Version roadmap and runbook gates
 
-5. **V2 — approved updates, in progress.** Immutable five-minute plans now freeze full resolution metadata, bind approval to a digest, require agreement acceptance, re-resolve before execution, persist bounded action outcomes and share an exclusion gate with refresh. Remaining: the structured WinGet resolver/executor, progress and cancellation semantics, result mapping, post-action inventory verification and explicit approval UI. Test the full path before adding executable update instructions to the runbook. Inventory evidence never authorizes execution.
+5. **V2 — approved updates, in progress.** Immutable five-minute plans freeze full resolution metadata, bind approval to a digest, require agreement acceptance, re-resolve before execution, persist bounded action outcomes and share an exclusion gate with refresh. A registered structured WinGet adapter now resolves and executes an exact package/source/version/scope, reports progress and explicit native outcomes, stops honoring cancellation once installation begins, and refreshes inventory after terminal execution. Remaining: the explicit approval UI and disposable-VM execution evidence. The read-only UI cannot invoke the adapter. Inventory evidence never authorizes execution.
 6. **V3 — cleanup/setup/backups, not implemented.** Define previews/exclusions and recovery for cleanup, repeatable reviewed desired state for setup, and destination/retention/encryption plus tested restores for backups. Add capability-specific runbooks alongside code. No maintenance commands exist in v1.
 
 Keep phase/acceptance criteria, ADRs, cause/fix/verification change notes, tests and runbooks aligned with each version.

@@ -43,3 +43,10 @@ Verification: Release compilation and 26 behavioral checks passed. Earlier nativ
 - Change: replace requests with five-minute immutable plans and digest-bound approvals; resolve twice and reject drift/tampering; require agreement acceptance; share one non-blocking operation coordinator across refresh and mutation; add SQLite schema 2 with 100 bounded action records and startup interruption recovery.
 - Rationale: reviewed facts remain distinct from live execution facts, concurrent operations fail closed, and a terminated process cannot leave a durable action marked running.
 - Verification: locked restore, serialized Release build and 51 behavioral checks passed. NuGet vulnerability lookup remained unavailable with NU1900 warnings. No executor or update UI is registered, so native update execution was not tested.
+
+## 2026-09-29 — V2 structured WinGet execution
+
+- Problem: the approval core had no native resolver/executor, explicit cancellation boundary, result mapping or post-action verification.
+- Change: add a structured `Microsoft.Management.Deployment` adapter that resolves one exact source/package/version/scope, rechecks installer/elevation/agreement details, reports progress, forwards cancellation only before installation, maps native outcomes, and always requests fresh inventory after an invoked terminal result. Register the resolver, executor, verifier and update service while keeping the UI read-only.
+- Safety: no shell command, retry, rollback, automatic reboot or unattended trigger exists. Native success becomes `SucceededUnverified` when fresh inventory cannot confirm the target version.
+- Verification: locked restore and serialized Release build passed; 58 behavioral checks passed. NU1900 remained because vulnerability data was unavailable. No host software was changed; disposable-VM execution and approval UI checks remain unverified.

@@ -2,7 +2,7 @@
 
 ## Current state
 
-V1 is implemented and release-verified as a personal Windows desktop application. It uses .NET 10, WPF and Blazor Hybrid with SQLite for the latest inventory snapshot and category preferences. The current application UI remains read-only: it does not install, update or remove software, expose a web server, create accounts, run a background service, or send inventory to an application backend. V2 now has an unregistered immutable-plan boundary, shared operation coordinator and schema 2 action recovery; no package resolver, executor or approval UI exists yet.
+V1 is implemented and release-verified as a personal Windows desktop application. It uses .NET 10, WPF and Blazor Hybrid with SQLite for the latest inventory snapshot and category preferences. The current application UI remains read-only: it exposes no install, update or remove action, web server, account, background service, or inventory backend. V2 now has an immutable-plan boundary, shared operation coordinator, schema 2 action recovery, and registered structured WinGet resolution/execution/verification services. No approval UI exists, so those services are not reachable from the product surface.
 
 The packaged framework-dependent release was verified at `artifacts/win-x64/PcDashboard.Desktop.exe`, with its adjacent dependencies and README. It requires Windows 11 x64 build 26100+, .NET 10 Desktop Runtime and WebView2. No administrator rights are required.
 
@@ -17,6 +17,6 @@ The packaged framework-dependent release was verified at `artifacts/win-x64/PcDa
 
 Historical behavioral, native provider and packaged UI checks covered launch, refresh, keyboard search, filtering, empty state and evidence expansion. Current verification and limitations are recorded in TEST-PLAN.md. Personal machine evidence is not retained in public documentation.
 
-Narrow-window resizing, a full screen-reader audit, a long-duration timer soak and verification on a separate clean Windows machine remain unverified. V2 execution/UI work and V3 cleanup/setup/backups remain incomplete and are not authorization to change software.
+Narrow-window resizing, a full screen-reader audit, a long-duration timer soak and verification on a separate clean Windows machine remain unverified. V2 approval UI and disposable-VM execution scenarios, plus V3 cleanup/setup/backups, remain incomplete and are not authorization to change software.
 
 See the [project plan](PROJECT-PLAN.md), [test evidence](TEST-PLAN.md), [change notes](CHANGE-NOTES.md) and [runbook](RUNBOOK.md) for detail.
