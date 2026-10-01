@@ -2,7 +2,7 @@
 
 ## Automated
 
-Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 29 September 2026, 68 checks passed: the V1 identity, privacy, persistence, failure, cancellation and category cases; the V2 immutable-plan, execution and recovery cases; and V3 schema-3 profile CRUD, all four preview classifications, exact-scope rejection, agreement gating, immediate revalidation, drift rejection and restart-required sequence stop.
+Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 1 October 2026, 73 checks passed: the V1/V2 cases; V3 setup profiles; and temporary-cleanup age/root filtering, default-empty selection, metadata drift skip, isolated locked-file failure, exact counts/bytes, tamper rejection, pre-action cancellation and safe resulting-empty-directory removal.
 
 Serialized Release solution build (`dotnet build PcDashboard.slnx -c Release --no-restore -m:1`) passed with zero errors. NuGet vulnerability lookup remains unverified because the service was unavailable and emitted NU1900 warnings.
 
@@ -26,6 +26,13 @@ The structured WinGet execution adapter compiles against the pinned 1.29.290 COM
 - Behavioral checks use a deterministic provider to prove agreement rejection, immediate second resolution, drift rejection, one-at-a-time execution, restart-required stopping, and transactional SQLite profile round trips/deletion.
 - Code review confirms profile search cannot execute, only `User` and `Machine` scopes persist, blocked items disable UI approval, complete resolution/agreement data is displayed, and the existing native executor disables effective cancellation after installation begins.
 - The browser accessibility tree exposed only the modal while open, with its name, focused heading, complete per-package metadata, agreements, named checkbox and disabled approval action. Native create/edit/delete/search, modal keyboard/focus/screen-reader behavior and narrow-window layout remain unverified. No WinGet install or update was invoked on the host. User/machine scope, UAC, update, cancellation, failure, drift and restart-required journeys remain disposable-VM release gates.
+
+## V3 temporary-cleanup evidence
+
+- Behavioral fixtures use an isolated generated directory, old and young files, a metadata-drifted file and a file held with exclusive sharing. They prove default-empty selection, seven-day filtering, one delete/one skip/one failure with exact bytes, continued processing, deletion of the resulting empty nested directory, tampered-path rejection and pre-action cancellation without deletion.
+- Code review confirms production construction derives only the current user's `%TEMP%`, rejects a reparse root, never follows reparse entries, limits results to 50,000 and shares the refresh/mutation gate. Execution rechecks the root and every selected candidate plus its parent chain immediately before deletion.
+- A representative fixture using the shipped CSS passed desktop and 420-pixel review: the modal remained bounded/scrollable, metadata stacked, long paths wrapped, and sticky actions remained available. Its accessibility tree exposed only the named modal, focused heading, incomplete-scan warning, definition-list summary, selected-file region, irreversible-action checkbox, Cancel and disabled Delete action.
+- Native scan/list/review keyboard, focus, screen-reader and narrow-window behavior is not yet verified. A separate disposable filesystem fixture for live reparse/inaccessible-entry races is also unverified. The host's real TEMP contents were not scanned or deleted.
 
 ## UI and release checklist
 

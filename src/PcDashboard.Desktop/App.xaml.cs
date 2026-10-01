@@ -48,6 +48,7 @@ public partial class App : Application
             collection.AddSingleton(TimeProvider.System);
             collection.AddSingleton<UpdateService>();
             collection.AddSingleton<SetupService>();
+            collection.AddSingleton<CleanupService>();
             services = collection.BuildServiceProvider();
             new MainWindow(services).Show();
         }
