@@ -64,9 +64,10 @@
         </tbody></table></div>
         @if (!Filtered.Any()) { <div class="empty"><h3>@(Data.Snapshot.Apps.Count == 0 ? "No inventory yet" : "No matching applications")</h3><p>@(Data.Snapshot.Apps.Count == 0 ? "Refresh to read installed applications. Source failures will be shown above." : "Try a different search or clear your filters.")</p></div> }
     </section>
-    <SetupProfiles Disabled="@(RefreshDisabled || reviewPlan is not null)" InteractionChanged="OnSetupInteraction" OperationChanged="OnSetupOperation" />
+    <SetupProfiles Disabled="@(RefreshDisabled || reviewPlan is not null)" InteractionChanged="OnMaintenanceInteraction" OperationChanged="OnChildOperation" />
+    <TempCleanup Disabled="@(RefreshDisabled || reviewPlan is not null)" InteractionChanged="OnMaintenanceInteraction" OperationChanged="OnChildOperation" />
     <details class="category-editor"><summary>Manage categories</summary><p>Suggestions are a starting point. Your assignments survive refreshes.</p><div class="filters"><label>New category<input maxlength="40" @bind="newCategory" /></label><button @onclick="AddCategory">Create category</button><label>Rename category<select @bind="renameFrom"><option value="">Choose category</option>@foreach (var category in categories) { <option>@category</option> }</select></label><label>New name<input maxlength="40" @bind="renameTo" /></label><button @onclick="RenameCategory">Rename</button></div></details>
-    <footer><p>“None reported” means the checked sources did not report an update. It does not guarantee the latest publisher release.</p><p>Updates require a fresh five-minute plan and explicit approval. No uninstall, automatic retry, rollback or automatic reboot is performed.</p></footer>
+    <footer><p>“None reported” means the checked sources did not report an update. It does not guarantee the latest publisher release.</p><p>Updates, setup, and cleanup require fresh five-minute plans and explicit approval. No uninstall, automatic retry, rollback or automatic reboot is performed.</p></footer>
 </main>
 
 @if (reviewPlan is not null)
@@ -113,10 +114,10 @@
     private ActionProgress? actionProgress;
     private ActionResult? actionResult;
     private ElementReference reviewDialog;
-    private bool agreementsAccepted, openDialogAfterRender, setupInteraction;
+    private bool agreementsAccepted, openDialogAfterRender, maintenanceInteraction;
     private bool ActionInProgress => actionResult is null && actionProgress is not null;
-    private bool ReviewDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null || setupInteraction;
-    private bool RefreshDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null || setupInteraction;
+    private bool ReviewDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null || maintenanceInteraction;
+    private bool RefreshDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null || maintenanceInteraction;
     private bool ApprovalDisabled => reviewPlan is null || ActionInProgress || reviewPlan.Resolution.Agreements.Count > 0 && !agreementsAccepted;
     private string ResultClass => actionResult?.Status switch { ActionStatus.Succeeded => "success", ActionStatus.RestartRequired => "restart-required", ActionStatus.Failed or ActionStatus.Interrupted => "error", ActionStatus.Cancelled or ActionStatus.Rejected or ActionStatus.SucceededUnverified => "warning", _ => "active" };
     private IEnumerable<InstalledApp> Filtered {
@@ -141,12 +142,12 @@
     private void CancelUpdate() { if (actionProgress?.CanCancel == true) actionCancellation?.Cancel(); }
     private void CancelOperation() { if (actionProgress?.CanCancel == true) cancelOperation?.Invoke(); }
     private void DismissResult() { actionResult = null; actionProgress = null; actionSubject = null; cancelOperation = null; }
-    private Task OnSetupInteraction(bool active) { setupInteraction = active; return InvokeAsync(StateHasChanged); }
-    private Task OnSetupOperation(OperationViewState state)
+    private Task OnMaintenanceInteraction(bool active) { maintenanceInteraction = active; return InvokeAsync(StateHasChanged); }
+    private Task OnChildOperation(OperationViewState state)
     {
         actionSubject = state.Subject; actionVerb = state.Verb; actionProgress = state.Progress;
         actionResult = state.Result; cancelOperation = state.Cancel;
-        if (state.Progress?.Message == "Waiting to start the approved setup.")
+        if (state.Progress?.Message.StartsWith("Waiting to start the approved ", StringComparison.Ordinal) == true)
             focusAfterRenderId = "operation-heading";
         return InvokeAsync(StateHasChanged);
     }

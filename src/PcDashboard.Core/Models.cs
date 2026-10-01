@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace PcDashboard.Core;
 
 public enum UpdateStatus { Unknown, Available, NoneReported, Unsupported, Failed }
-public enum ActionKind { Update, Setup }
+public enum ActionKind { Update, Setup, Cleanup }
 public enum ActionStatus { Planned, Rejected, Running, Succeeded, SucceededUnverified, Failed, Cancelled, RestartRequired, Interrupted }
 public enum ActionProgressStage { Queued, Downloading, Installing, PostInstall, Verifying, Completed }
 public enum SetupDisposition { Current, Install, Update, Blocked }
@@ -51,6 +51,18 @@ public sealed record SetupPlan(Guid PlanId, Guid ProfileId, string ProfileName,
     string Digest);
 public sealed record SetupApproval(Guid PlanId, string Digest, DateTimeOffset ApprovedAt,
     bool AgreementsAccepted, string ApprovalToken);
+
+public sealed record CleanupCandidate(string Path, long Length, DateTimeOffset LastWriteUtc,
+    bool IsReparsePoint);
+public sealed record CleanupPlan(Guid PlanId, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt,
+    string Root, IReadOnlyList<CleanupCandidate> Files, bool ScanIncomplete, string Digest)
+{
+    public long TotalBytes => Files.Sum(file => file.Length);
+}
+public sealed record CleanupApproval(Guid PlanId, string Digest, DateTimeOffset ApprovedAt,
+    string ApprovalToken);
+public sealed record CleanupResult(ActionStatus Status, int Deleted, int Skipped, int Failed,
+    long BytesDeleted, string Message);
 
 public static class PlanDigests
 {

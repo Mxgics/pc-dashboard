@@ -267,6 +267,71 @@ internal static class BehaviorTests
             {
                 Check(true, "Setup profile persistence rejects an inexact package scope");
             }
+
+            var cleanupDirectory = Path.Combine(directory, "cleanup-root");
+            var cleanupNested = Path.Combine(cleanupDirectory, "nested");
+            Directory.CreateDirectory(cleanupNested);
+            var stablePath = Path.Combine(cleanupNested, "stable.tmp");
+            var lockedPath = Path.Combine(cleanupDirectory, "locked.tmp");
+            var driftPath = Path.Combine(cleanupDirectory, "drift.tmp");
+            var youngPath = Path.Combine(cleanupDirectory, "young.tmp");
+            File.WriteAllText(stablePath, "stable");
+            File.WriteAllText(lockedPath, "locked");
+            File.WriteAllText(driftPath, "drift");
+            File.WriteAllText(youngPath, "young");
+            foreach (var oldPath in new[] { stablePath, lockedPath, driftPath })
+                File.SetLastWriteTimeUtc(oldPath, now.UtcDateTime.AddDays(-8));
+            var cleanupActions = new RecordingActionStore();
+            var cleanup = new CleanupService(cleanupActions, new OperationCoordinator(), clock,
+                cleanupDirectory);
+            var scan = await cleanup.ScanAsync();
+            Check(scan.Files.Count == 3 && !scan.ScanIncomplete
+                && scan.Files.All(file => !file.IsReparsePoint)
+                && scan.Files.All(file => !file.Path.EndsWith("young.tmp")),
+                "Cleanup scan includes only old regular files under the exact root");
+            var emptySelection = cleanup.Select(scan, []);
+            var emptyResult = await cleanup.ExecuteApprovedAsync(emptySelection,
+                new(emptySelection.PlanId, emptySelection.Digest, now, "approved"));
+            Check(emptyResult.Status == ActionStatus.Rejected && scan.Files.Count == 3,
+                "Cleanup selects nothing by default and rejects an empty approval");
+            var selectedCleanup = cleanup.Select(scan, scan.Files.Select(file => file.Path));
+            File.AppendAllText(driftPath, " changed");
+            File.SetLastWriteTimeUtc(driftPath, now.UtcDateTime.AddDays(-8));
+            var stableBytes = new FileInfo(stablePath).Length;
+            CleanupResult partialCleanup;
+            using (File.Open(lockedPath, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                partialCleanup = await cleanup.ExecuteApprovedAsync(selectedCleanup,
+                    new(selectedCleanup.PlanId, selectedCleanup.Digest, now, "approved"));
+            }
+            Check(partialCleanup.Status == ActionStatus.Failed && partialCleanup.Deleted == 1
+                && partialCleanup.Skipped == 1 && partialCleanup.Failed == 1
+                && partialCleanup.BytesDeleted == stableBytes && !File.Exists(stablePath)
+                && !Directory.Exists(cleanupNested),
+                "Cleanup revalidates drift, continues isolated failures, reports exact partial results, and removes resulting empty directories");
+            var tamperedCleanup = selectedCleanup with
+            {
+                Files = [new(Path.Combine(directory, "outside.tmp"), 1,
+                    now.AddDays(-8), false)]
+            };
+            var tamperedCleanupResult = await cleanup.ExecuteApprovedAsync(tamperedCleanup,
+                new(tamperedCleanup.PlanId, tamperedCleanup.Digest, now, "approved"));
+            Check(tamperedCleanupResult.Status == ActionStatus.Rejected,
+                "Cleanup rejects a tampered path outside the frozen root");
+            var cancelPath = Path.Combine(cleanupDirectory, "cancel.tmp");
+            File.WriteAllText(cancelPath, "cancel");
+            File.SetLastWriteTimeUtc(cancelPath, now.UtcDateTime.AddDays(-8));
+            var cancelScan = await cleanup.ScanAsync();
+            var cancelPlan = cleanup.Select(cancelScan,
+                cancelScan.Files.Where(file => file.Path == Path.GetFullPath(cancelPath))
+                    .Select(file => file.Path));
+            using var cleanupCancellation = new CancellationTokenSource();
+            cleanupCancellation.Cancel();
+            var cancelledCleanup = await cleanup.ExecuteApprovedAsync(cancelPlan,
+                new(cancelPlan.PlanId, cancelPlan.Digest, now, "approved"),
+                ct: cleanupCancellation.Token);
+            Check(cancelledCleanup.Status == ActionStatus.Cancelled && File.Exists(cancelPath),
+                "Cleanup cancellation before the action gate deletes nothing");
             var unfinishedId = Guid.NewGuid();
             await store.StartActionAsync(new(unfinishedId, ActionKind.Update, "Interrupted example",
                 ActionStatus.Running, now));

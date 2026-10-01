@@ -1,0 +1,154 @@
+@implements IAsyncDisposable
+@inject CleanupService Cleanup
+@inject IJSRuntime JS
+
+<section class="cleanup-panel" aria-labelledby="cleanup-heading" aria-busy="@scanning">
+    <div class="section-title"><div><p class="eyebrow">V3 · REVIEWED CLEANUP</p><h2 id="cleanup-heading">Temporary files</h2></div><div class="actions"><button id="scan-temp-files" disabled="@(Disabled || scanning)" @onclick="Scan">@(scanning ? "Scanning…" : "Scan temporary files")</button>@if (scanning) { <button @onclick="CancelScan">Cancel scan</button> }</div></div>
+    <p>Scan only your canonical Windows TEMP folder. Links, reparse points, inaccessible entries, and files newer than seven days are excluded.</p>
+    @if (message is not null) { <p class="notice" role="status">@message</p> }
+    @if (scan is null)
+    { <div class="empty"><h3>No cleanup scan</h3><p>Nothing is selected automatically. Scan, inspect each file, then explicitly choose what to review.</p></div> }
+    else
+    {
+        <div class="cleanup-summary"><div><span>Eligible files</span><strong>@scan.Files.Count</strong></div><div><span>Selected</span><strong>@selected.Count</strong></div><div><span>Selected bytes</span><strong>@FormatBytes(SelectedBytes)</strong></div></div>
+        <p class="root-note"><strong>Scan root:</strong> <span class="mono wrap">@scan.Root</span></p>
+        @if (scan.ScanIncomplete) { <p class="notice" role="alert"><strong>Incomplete scan.</strong> At least one entry was inaccessible or the safety limit was reached. Only the files listed below can be selected.</p> }
+        @if (scan.Files.Count == 0)
+        { <div class="empty"><h3>No eligible files</h3><p>No regular file older than seven days was found in the permitted root.</p></div> }
+        else
+        {
+            <div class="cleanup-list" role="group" aria-label="Eligible temporary files">
+                @foreach (var file in scan.Files)
+                {
+                    <label class="cleanup-file" @key="file.Path"><input type="checkbox" checked="@selected.Contains(file.Path)" disabled="@Disabled" @onchange="args => Toggle(file.Path, args.Value as bool? == true)" /><span><strong class="mono wrap">@file.Path</strong><small>@FormatBytes(file.Length) · modified @file.LastWriteUtc.ToLocalTime().ToString("g") · regular file</small></span></label>
+                }
+            </div>
+        }
+        <div class="cleanup-actions"><p>Selection is local to this scan and expires at @scan.ExpiresAt.ToLocalTime().ToString("t").</p><button id="review-cleanup" class="primary" disabled="@(Disabled || selected.Count == 0)" @onclick="Review">Review selected files</button></div>
+    }
+</section>
+
+@if (reviewPlan is not null)
+{
+    <dialog @ref="reviewDialog" class="review-dialog cleanup-review" aria-labelledby="cleanup-review-title" aria-describedby="cleanup-review-summary" @oncancel="CancelReview" @oncancel:preventDefault>
+        <div class="dialog-header"><div><p class="eyebrow">DELETION APPROVAL REQUIRED</p><h2 id="cleanup-review-title" tabindex="-1">Review temporary-file cleanup</h2></div><button class="icon-button" aria-label="Close cleanup review" @onclick="CancelReview">×</button></div>
+        <p id="cleanup-review-summary">Review the exact frozen selection. Approval expires at <strong>@reviewPlan.ExpiresAt.ToLocalTime().ToString("t")</strong>.</p>
+        @if (reviewError is not null) { <p class="notice" role="alert">@reviewError</p> }
+        @if (reviewPlan.ScanIncomplete) { <p class="notice"><strong>The source scan was incomplete.</strong> Unlisted entries will not be touched.</p> }
+        <dl class="review-metadata"><dt>Canonical root</dt><dd class="mono wrap">@reviewPlan.Root</dd><dt>Selected files</dt><dd>@reviewPlan.Files.Count</dd><dt>Selected bytes</dt><dd>@FormatBytes(reviewPlan.TotalBytes)</dd><dt>Minimum age</dt><dd>Seven days</dd></dl>
+        <div class="cleanup-review-list" aria-label="Files approved for deletion">
+            @foreach (var file in reviewPlan.Files)
+            { <article><strong class="mono wrap">@file.Path</strong><small>@FormatBytes(file.Length) · @file.LastWriteUtc.ToLocalTime().ToString("g") · reparse point: @file.IsReparsePoint.ToString().ToLowerInvariant()</small></article> }
+        </div>
+        <p class="operation-note">Before deleting each file, PC Dashboard rechecks its canonical path, root, age, size, timestamp, and reparse state. Changed files are skipped. Individual failures do not stop later files. Cancellation stops before the next file.</p>
+        <label class="agreement-check"><input type="checkbox" @bind="deletionAccepted" /> I understand these selected files will be deleted without a recycle-bin or rollback step.</label>
+        <div class="dialog-actions"><button @onclick="CancelReview">Cancel</button><button class="primary" disabled="@(!deletionAccepted)" @onclick="Approve">Delete selected files</button></div>
+    </dialog>
+}
+
+@code {
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<bool> InteractionChanged { get; set; }
+    [Parameter] public EventCallback<OperationViewState> OperationChanged { get; set; }
+    private readonly CancellationTokenSource lifetime = new();
+    private CancellationTokenSource? scanCancellation, operationCancellation;
+    private readonly HashSet<string> selected = new(StringComparer.OrdinalIgnoreCase);
+    private CleanupPlan? scan, reviewPlan;
+    private ElementReference reviewDialog;
+    private string? message, reviewError, focusAfterRenderId;
+    private bool scanning, deletionAccepted, openDialogAfterRender;
+    private long SelectedBytes => scan?.Files.Where(file => selected.Contains(file.Path)).Sum(file => file.Length) ?? 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (openDialogAfterRender)
+        {
+            openDialogAfterRender = false;
+            await JS.InvokeVoidAsync("pcDashboard.showModal", reviewDialog, "cleanup-review-title");
+        }
+        if (focusAfterRenderId is not null)
+        {
+            var id = focusAfterRenderId; focusAfterRenderId = null;
+            await JS.InvokeVoidAsync("pcDashboard.focusById", id);
+        }
+    }
+    private async Task Scan()
+    {
+        scanning = true; message = null; selected.Clear();
+        scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        await InteractionChanged.InvokeAsync(true);
+        try
+        {
+            scan = await Cleanup.ScanAsync(scanCancellation.Token);
+            message = scan.ScanIncomplete
+                ? "The scan completed with inaccessible or unscanned entries."
+                : $"Scan complete. {scan.Files.Count} eligible files found; none selected.";
+        }
+        catch (OperationCanceledException) { message = "Temporary-file scan cancelled."; }
+        catch (Exception ex) { message = $"Temporary-file scan failed: {ex.Message}"; }
+        finally
+        {
+            scanCancellation.Dispose(); scanCancellation = null; scanning = false;
+            await InteractionChanged.InvokeAsync(false);
+        }
+    }
+    private void CancelScan() => scanCancellation?.Cancel();
+    private void Toggle(string path, bool value) { if (value) selected.Add(path); else selected.Remove(path); }
+    private async Task Review()
+    {
+        if (scan is null || selected.Count == 0 || Disabled) return;
+        try
+        {
+            reviewPlan = Cleanup.Select(scan, selected);
+            deletionAccepted = false; reviewError = null; openDialogAfterRender = true;
+            await InteractionChanged.InvokeAsync(true);
+        }
+        catch (Exception ex) { message = $"Could not prepare cleanup: {ex.Message}"; }
+    }
+    private async Task Approve()
+    {
+        if (reviewPlan is null || !deletionAccepted) return;
+        if (DateTimeOffset.UtcNow > reviewPlan.ExpiresAt) { reviewError = "This cleanup approval expired. Close it and scan again."; return; }
+        var plan = reviewPlan;
+        var approval = new CleanupApproval(plan.PlanId, plan.Digest, DateTimeOffset.UtcNow,
+            Guid.NewGuid().ToString("N"));
+        operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        await CloseReview(null);
+        var initial = new ActionProgress(ActionProgressStage.Queued,
+            "Waiting to start the approved cleanup.");
+        await OperationChanged.InvokeAsync(new("Temporary files", "Cleanup", initial, null, CancelOperation));
+        var progress = new Progress<ActionProgress>(value =>
+            _ = InvokeAsync(() => OperationChanged.InvokeAsync(
+                new("Temporary files", "Cleanup", value, null, CancelOperation))));
+        CleanupResult result;
+        try { result = await Cleanup.ExecuteApprovedAsync(plan, approval, progress, operationCancellation.Token); }
+        catch (Exception ex) { result = new(ActionStatus.Failed, 0, 0, 1, 0, $"Cleanup failed: {ex.Message}"); }
+        finally { operationCancellation.Dispose(); operationCancellation = null; }
+        scan = null; selected.Clear(); message = result.Message;
+        var actionResult = new ActionResult(result.Status, "Temporary files", result.Message,
+            CompletedAt: DateTimeOffset.UtcNow);
+        await OperationChanged.InvokeAsync(new("Temporary files", "Cleanup", null, actionResult, null));
+    }
+    private Task CancelReview() => CloseReview("review-cleanup");
+    private async Task CloseReview(string? focusId)
+    {
+        if (reviewPlan is null) return;
+        await JS.InvokeVoidAsync("pcDashboard.closeModal", reviewDialog);
+        reviewPlan = null; reviewError = null; deletionAccepted = false; focusAfterRenderId = focusId;
+        await InteractionChanged.InvokeAsync(false);
+    }
+    private void CancelOperation() => operationCancellation?.Cancel();
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        var value = (double)bytes; var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1) { value /= 1024; unit++; }
+        return $"{value:0.##} {units[unit]}";
+    }
+    public ValueTask DisposeAsync()
+    {
+        lifetime.Cancel(); scanCancellation?.Cancel(); operationCancellation?.Cancel();
+        scanCancellation?.Dispose(); operationCancellation?.Dispose(); lifetime.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
