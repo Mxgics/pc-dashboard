@@ -4,7 +4,7 @@
 @inject BackupDialogs Dialogs
 @inject IJSRuntime JS
 
-<section class="backup-panel" aria-labelledby="backup-heading" aria-busy="@working">
+<section id="backup-restore" class="backup-panel" aria-labelledby="backup-heading" aria-busy="@working">
     <div class="section-title"><div><p class="eyebrow">V3 · ENCRYPTED PORTABILITY</p><h2 id="backup-heading">Backup and restore</h2></div></div>
     <p>Back up only categories, aliases, assignments, and setup profiles. Inventory, action history, and diagnostics are never included.</p>
     @if (message is not null) { <p class="notice" role="status">@message</p> }
