@@ -36,6 +36,7 @@ public partial class App : Application
             collection.AddSingleton<IDashboardStore>(store);
             collection.AddSingleton<IActionStore>(store);
             collection.AddSingleton<ISetupProfileStore>(store);
+            collection.AddSingleton<IBackupStore>(store);
             foreach (var provider in providers) collection.AddSingleton(provider);
             collection.AddSingleton<IUpdateProvider, WinGetUpdates>();
             collection.AddSingleton<OperationCoordinator>();
@@ -49,6 +50,13 @@ public partial class App : Application
             collection.AddSingleton<UpdateService>();
             collection.AddSingleton<SetupService>();
             collection.AddSingleton<CleanupService>();
+            collection.AddSingleton<BackupDialogs>();
+            collection.AddSingleton(services => new BackupService(
+                services.GetRequiredService<IBackupStore>(),
+                services.GetRequiredService<IActionStore>(),
+                services.GetRequiredService<OperationCoordinator>(),
+                services.GetRequiredService<TimeProvider>(),
+                Path.Combine(DataDirectory, "safety-backups")));
             services = collection.BuildServiceProvider();
             new MainWindow(services).Show();
         }

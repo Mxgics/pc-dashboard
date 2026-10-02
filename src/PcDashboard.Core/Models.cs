@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace PcDashboard.Core;
 
 public enum UpdateStatus { Unknown, Available, NoneReported, Unsupported, Failed }
-public enum ActionKind { Update, Setup, Cleanup }
+public enum ActionKind { Update, Setup, Cleanup, Backup, Restore }
 public enum ActionStatus { Planned, Rejected, Running, Succeeded, SucceededUnverified, Failed, Cancelled, RestartRequired, Interrupted }
 public enum ActionProgressStage { Queued, Downloading, Installing, PostInstall, Verifying, Completed }
 public enum SetupDisposition { Current, Install, Update, Blocked }
@@ -63,6 +63,16 @@ public sealed record CleanupApproval(Guid PlanId, string Digest, DateTimeOffset 
     string ApprovalToken);
 public sealed record CleanupResult(ActionStatus Status, int Deleted, int Skipped, int Failed,
     long BytesDeleted, string Message);
+
+public sealed record BackupAlias(string Original, string Category);
+public sealed record BackupAssignment(string AppId, string Category);
+public sealed record BackupPayload(int SchemaVersion, DateTimeOffset ExportedAt,
+    IReadOnlyList<string> Categories, IReadOnlyList<BackupAlias> Aliases,
+    IReadOnlyList<BackupAssignment> Assignments, IReadOnlyList<SetupProfile> Profiles);
+public sealed record BackupPreview(string ArchivePath, string ArchiveDigest,
+    DateTimeOffset ExportedAt, int CategoryCount, int AliasCount, int AssignmentCount,
+    int ProfileCount, int PackageCount);
+public sealed record RestoreResult(ActionStatus Status, string Message, string? SafetyBackupPath = null);
 
 public static class PlanDigests
 {
@@ -158,6 +168,11 @@ public interface ISetupProfileStore
     Task<IReadOnlyList<SetupProfile>> SetupProfilesAsync(CancellationToken ct = default);
     Task SaveSetupProfileAsync(SetupProfile profile, CancellationToken ct = default);
     Task DeleteSetupProfileAsync(Guid id, CancellationToken ct = default);
+}
+public interface IBackupStore
+{
+    Task<BackupPayload> ExportBackupAsync(CancellationToken ct = default);
+    Task RestoreBackupAsync(BackupPayload payload, CancellationToken ct = default);
 }
 public static class Categories
 {

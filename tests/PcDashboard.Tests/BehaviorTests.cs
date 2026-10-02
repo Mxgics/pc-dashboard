@@ -268,6 +268,92 @@ internal static class BehaviorTests
                 Check(true, "Setup profile persistence rejects an inexact package scope");
             }
 
+            await store.AddCategoryAsync("Backup source");
+            await store.AssignAsync(app.Id, "Backup source");
+            var backupProfile = new SetupProfile(Guid.NewGuid(), "Portable tools",
+                [new(Guid.NewGuid(), "Vendor.Portable", "winget", "User")]);
+            await store.SaveSetupProfileAsync(backupProfile);
+            var backupActions = new RecordingActionStore();
+            var backupDirectory = Path.Combine(directory, "safety");
+            var backupService = new BackupService(store, backupActions,
+                new OperationCoordinator(), clock, backupDirectory);
+            var archivePath = Path.Combine(directory, "portable.pcdbak");
+            const string passphrase = "synthetic-backup-test-passphrase";
+            await backupService.CreateAsync(archivePath, passphrase);
+            var archiveBytes = await File.ReadAllBytesAsync(archivePath);
+            Check(archiveBytes.AsSpan(0, 8).SequenceEqual("PCDBAK01"u8)
+                && !System.Text.Encoding.UTF8.GetString(archiveBytes).Contains("Vendor.Portable"),
+                "Backup uses the versioned encrypted format without plaintext records");
+            var backupPreview = await backupService.PreviewAsync(archivePath, passphrase);
+            Check(backupPreview.ProfileCount == 1 && backupPreview.PackageCount == 1
+                && backupPreview.AssignmentCount >= 1,
+                "Authenticated backup preview reports the complete supported record counts");
+            string? wrongPassphraseMessage = null;
+            try { await backupService.PreviewAsync(archivePath, "wrong passphrase"); }
+            catch (InvalidOperationException ex) { wrongPassphraseMessage = ex.Message; }
+            var tamperedPath = Path.Combine(directory, "tampered.pcdbak");
+            archiveBytes[^1] ^= 0x01;
+            await File.WriteAllBytesAsync(tamperedPath, archiveBytes);
+            string? tamperedMessage = null;
+            try { await backupService.PreviewAsync(tamperedPath, passphrase); }
+            catch (InvalidOperationException ex) { tamperedMessage = ex.Message; }
+            Check(wrongPassphraseMessage is not null && wrongPassphraseMessage == tamperedMessage,
+                "Wrong passphrase and authenticated-file tampering return one generic error");
+            var oversizedPath = Path.Combine(directory, "oversized.pcdbak");
+            await using (var oversized = File.Create(oversizedPath))
+                oversized.SetLength(BackupService.MaximumArchiveBytes + 1L);
+            try { await backupService.PreviewAsync(oversizedPath, passphrase); throw new Exception("Oversized backup opened"); }
+            catch (InvalidOperationException)
+            {
+                Check(true, "Backup archive size limit is enforced before decryption");
+            }
+            var unsupportedPath = Path.Combine(directory, "unsupported.pcdbak");
+            var unsupportedBytes = await File.ReadAllBytesAsync(archivePath);
+            BitConverter.GetBytes(BackupService.ArchiveVersion + 1).CopyTo(unsupportedBytes, 8);
+            await File.WriteAllBytesAsync(unsupportedPath, unsupportedBytes);
+            try { await backupService.PreviewAsync(unsupportedPath, passphrase); throw new Exception("Unsupported backup opened"); }
+            catch (InvalidOperationException ex)
+            {
+                Check(ex.Message.Contains("version", StringComparison.OrdinalIgnoreCase),
+                    "Unsupported backup format version is rejected explicitly");
+            }
+
+            await store.RenameCategoryAsync("Backup source", "Changed after backup");
+            await store.DeleteSetupProfileAsync(backupProfile.Id);
+            var retainedSnapshot = new Snapshot([app with { Id = "retained-after-restore" }], []);
+            await store.SaveAsync(retainedSnapshot);
+            var restore = await backupService.RestoreAsync(backupPreview, passphrase);
+            Check(restore.Status == ActionStatus.Succeeded
+                && (await store.CategoriesAsync()).Contains("Backup source")
+                && !(await store.CategoriesAsync()).Contains("Changed after backup")
+                && (await store.AssignmentsAsync())[app.Id] == "Backup source"
+                && (await store.SetupProfilesAsync()).Single().Id == backupProfile.Id,
+                "Restore replaces only reviewed portable settings in one successful operation");
+            Check((await store.LoadAsync()).Apps.Single().Id == "retained-after-restore",
+                "Restore excludes inventory snapshots and update evidence");
+            Check(restore.SafetyBackupPath is not null && File.Exists(restore.SafetyBackupPath)
+                && (await backupService.PreviewAsync(restore.SafetyBackupPath, passphrase)).ProfileCount == 0,
+                "Restore first creates an authenticated encrypted safety backup of current settings");
+            Check(!Directory.EnumerateFiles(directory, "*.tmp", SearchOption.AllDirectories).Any(),
+                "Atomic backup writes leave no plaintext or temporary files");
+
+            var duplicateItemId = Guid.NewGuid();
+            var invalidRestore = new BackupPayload(BackupService.ArchiveVersion, now,
+                ["Rollback category"], [], [],
+                [new(Guid.NewGuid(), "One", [new(duplicateItemId, "Vendor.One", "winget", "User")]),
+                 new(Guid.NewGuid(), "Two", [new(duplicateItemId, "Vendor.Two", "winget", "User")])]);
+            try
+            {
+                await store.RestoreBackupAsync(invalidRestore);
+                throw new Exception("Invalid restore unexpectedly committed");
+            }
+            catch (SqliteException)
+            {
+                Check((await store.CategoriesAsync()).Contains("Backup source")
+                    && (await store.SetupProfilesAsync()).Single().Id == backupProfile.Id,
+                    "Failed restore rolls back every portable-settings table");
+            }
+
             var cleanupDirectory = Path.Combine(directory, "cleanup-root");
             var cleanupNested = Path.Combine(cleanupDirectory, "nested");
             Directory.CreateDirectory(cleanupNested);

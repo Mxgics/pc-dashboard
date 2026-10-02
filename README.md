@@ -2,7 +2,7 @@
 
 A local Windows desktop dashboard for understanding installed applications, versions, available updates, and personal categories.
 
-The app runs as the current Windows user and stores its latest snapshot locally. V2 adds a per-application **Review update** flow. V3 adds reviewed setup profiles and temporary-file cleanup. Cleanup scans only the canonical current-user TEMP root, selects nothing by default, and revalidates every explicitly approved file before deletion. No uninstall, unattended change, automatic retry, rollback or automatic reboot is provided.
+The app runs as the current Windows user and stores its latest snapshot locally. V2 adds a per-application **Review update** flow. V3 adds reviewed setup profiles, temporary-file cleanup, and encrypted portable-settings backup/restore. Cleanup scans only the canonical current-user TEMP root, selects nothing by default, and revalidates every explicitly approved file before deletion. Backups contain only categories, aliases, assignments, and setup profiles. No uninstall, unattended change, automatic retry, rollback claim or automatic reboot is provided.
 
 ## Build and verify
 
@@ -18,10 +18,10 @@ Package locally with `powershell -NoProfile -File scripts/Publish.ps1`, then lau
 
 [Project context](docs/PROJECT-CONTEXT.md) · [Project plan](docs/PROJECT-PLAN.md) · [Architecture decisions](docs/ADRS.md) · [Runbook](docs/RUNBOOK.md) · [Test evidence](docs/TEST-PLAN.md) · [Change notes](docs/CHANGE-NOTES.md)
 
-V2 approved updates plus the V3 setup-profile and temporary-cleanup layers are implemented but not release-promoted: disposable-VM execution, native accessibility and final public-release gates remain. V3 encrypted backup/restore remains roadmap only. The app has no telemetry backend; WinGet and WebView2 retain their own diagnostics policies and global settings.
+V2 approved updates plus the V3 setup-profile, temporary-cleanup, and encrypted backup/restore layers are implemented but not release-promoted: disposable-VM execution, native accessibility and final public-release gates remain. The app has no telemetry backend; WinGet and WebView2 retain their own diagnostics policies and global settings.
 
 ## Privacy
 
-Application inventory, categories and diagnostics stay in `%LOCALAPPDATA%/PcDashboard/dashboard.db`. SQLite is not encrypted. WebView2 maintains a separate local runtime profile. No diagnostic file or probe export is produced. Never publish the database, runtime profile, legacy reports, or unreviewed build artifacts. See the runbook for recovery and migration.
+Application inventory, categories and diagnostics stay in `%LOCALAPPDATA%/PcDashboard/dashboard.db`. SQLite is not encrypted. User-created `.pcdbak` files and automatic pre-restore safety backups are encrypted and authenticated, but their passphrases cannot be recovered. WebView2 maintains a separate local runtime profile. No diagnostic file or probe export is produced. Never publish the database, runtime profile, backup passphrases, legacy reports, or unreviewed build artifacts. See the runbook for recovery and migration.
 
 Public-source preparation and remaining publication gates are documented in [PUBLIC-RELEASE.md](docs/PUBLIC-RELEASE.md).

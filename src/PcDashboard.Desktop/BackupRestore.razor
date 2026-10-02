@@ -1,0 +1,175 @@
+@implements IAsyncDisposable
+@using System.IO
+@inject BackupService Backups
+@inject BackupDialogs Dialogs
+@inject IJSRuntime JS
+
+<section class="backup-panel" aria-labelledby="backup-heading" aria-busy="@working">
+    <div class="section-title"><div><p class="eyebrow">V3 · ENCRYPTED PORTABILITY</p><h2 id="backup-heading">Backup and restore</h2></div></div>
+    <p>Back up only categories, aliases, assignments, and setup profiles. Inventory, action history, and diagnostics are never included.</p>
+    @if (message is not null) { <p class="notice" role="status">@message</p> }
+    <div class="backup-grid">
+        <form class="backup-card" @onsubmit="CreateBackup" @onsubmit:preventDefault>
+            <h3>Create backup</h3>
+            <p>Choose a <span class="mono">.pcdbak</span> file and protect it with a passphrase. PC Dashboard never writes a plaintext backup file.</p>
+            <button type="button" disabled="@(Disabled || working)" @onclick="ChooseDestination">Choose destination</button>
+            <p class="file-choice">@(backupPath is null ? "No destination selected." : Path.GetFileName(backupPath))</p>
+            <label>Passphrase<input type="password" autocomplete="new-password" maxlength="1024" required @bind="backupPassphrase" /></label>
+            <label>Confirm passphrase<input type="password" autocomplete="new-password" maxlength="1024" required @bind="backupConfirmation" /></label>
+            <button class="primary" disabled="@(Disabled || working || backupPath is null || string.IsNullOrEmpty(backupPassphrase) || backupPassphrase != backupConfirmation)" type="submit">Create encrypted backup</button>
+        </form>
+        <form class="backup-card" @onsubmit="PreviewRestore" @onsubmit:preventDefault>
+            <h3>Restore backup</h3>
+            <p>Open and authenticate a backup before reviewing its exact record counts. Existing portable settings are replaced only after approval.</p>
+            <button id="choose-restore-file" type="button" disabled="@(Disabled || working)" @onclick="ChooseRestoreFile">Choose backup</button>
+            <p class="file-choice">@(restorePath is null ? "No backup selected." : Path.GetFileName(restorePath))</p>
+            <label>Passphrase<input type="password" autocomplete="current-password" maxlength="1024" required @bind="restorePassphrase" /></label>
+            <button class="primary" disabled="@(Disabled || working || restorePath is null || string.IsNullOrEmpty(restorePassphrase))" type="submit">Preview restore</button>
+        </form>
+    </div>
+</section>
+
+@if (preview is not null)
+{
+    <dialog @ref="reviewDialog" class="review-dialog restore-review" aria-labelledby="restore-review-title" aria-describedby="restore-review-summary" @oncancel="CancelReview" @oncancel:preventDefault>
+        <div class="dialog-header"><div><p class="eyebrow">RESTORE APPROVAL REQUIRED</p><h2 id="restore-review-title" tabindex="-1">Review backup restore</h2></div><button class="icon-button" aria-label="Close restore review" @onclick="CancelReview">×</button></div>
+        <p id="restore-review-summary">This authenticated backup was exported <strong>@preview.ExportedAt.ToLocalTime().ToString("g")</strong>. Review its complete supported scope before replacing current settings.</p>
+        @if (reviewError is not null) { <p class="notice" role="alert">@reviewError</p> }
+        <dl class="review-metadata"><dt>Archive</dt><dd class="mono wrap">@Path.GetFileName(preview.ArchivePath)</dd><dt>Categories</dt><dd>@preview.CategoryCount</dd><dt>Aliases</dt><dd>@preview.AliasCount</dd><dt>Assignments</dt><dd>@preview.AssignmentCount</dd><dt>Setup profiles</dt><dd>@preview.ProfileCount</dd><dt>Profile packages</dt><dd>@preview.PackageCount</dd></dl>
+        <p class="operation-note">Immediately before restore, PC Dashboard re-reads and authenticates this exact archive. It first creates a separate encrypted safety backup of current portable settings, then restores the reviewed data in one SQLite transaction.</p>
+        <p>Not restored: inventory snapshots, update evidence, action history, diagnostics, logs, or application files.</p>
+        <label class="agreement-check"><input type="checkbox" @bind="restoreAccepted" /> I understand the listed portable settings will replace their current values.</label>
+        <div class="dialog-actions"><button @onclick="CancelReview">Cancel</button><button class="primary" disabled="@(!restoreAccepted || working)" @onclick="ApproveRestore">Create safety backup and restore</button></div>
+    </dialog>
+}
+
+@code {
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<bool> InteractionChanged { get; set; }
+    [Parameter] public EventCallback<OperationViewState> OperationChanged { get; set; }
+    [Parameter] public EventCallback Restored { get; set; }
+    private readonly CancellationTokenSource lifetime = new();
+    private CancellationTokenSource? operationCancellation;
+    private string? backupPath, restorePath, message, reviewError, focusAfterRenderId;
+    private string backupPassphrase = "", backupConfirmation = "", restorePassphrase = "";
+    private BackupPreview? preview;
+    private ElementReference reviewDialog;
+    private bool working, restoreAccepted, openDialogAfterRender;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (openDialogAfterRender)
+        {
+            openDialogAfterRender = false;
+            await JS.InvokeVoidAsync("pcDashboard.showModal", reviewDialog, "restore-review-title");
+        }
+        if (focusAfterRenderId is not null)
+        {
+            var id = focusAfterRenderId; focusAfterRenderId = null;
+            await JS.InvokeVoidAsync("pcDashboard.focusById", id);
+        }
+    }
+
+    private void ChooseDestination() => backupPath = Dialogs.ChooseBackupDestination();
+    private void ChooseRestoreFile()
+    {
+        restorePath = Dialogs.ChooseBackupToRestore();
+        preview = null; restoreAccepted = false; reviewError = null;
+    }
+
+    private async Task CreateBackup()
+    {
+        if (backupPath is null || backupPassphrase != backupConfirmation || Disabled) return;
+        working = true; message = null;
+        operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        await InteractionChanged.InvokeAsync(true);
+        await OperationChanged.InvokeAsync(new("Portable settings", "Backup",
+            new(ActionProgressStage.Queued, "Waiting to start the approved backup."), null, CancelOperation));
+        ActionResult result;
+        try
+        {
+            await Backups.CreateAsync(backupPath, backupPassphrase, operationCancellation.Token);
+            result = new(ActionStatus.Succeeded, "Portable settings",
+                $"Encrypted backup created: {Path.GetFileName(backupPath)}", CompletedAt: DateTimeOffset.UtcNow);
+            message = result.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            result = new(ActionStatus.Cancelled, "Portable settings", "Backup creation cancelled.", CompletedAt: DateTimeOffset.UtcNow);
+            message = result.Message;
+        }
+        catch (Exception ex)
+        {
+            result = new(ActionStatus.Failed, "Portable settings", $"Backup failed: {ex.Message}", CompletedAt: DateTimeOffset.UtcNow);
+            message = result.Message;
+        }
+        finally
+        {
+            backupPassphrase = backupConfirmation = "";
+            operationCancellation.Dispose(); operationCancellation = null; working = false;
+            await InteractionChanged.InvokeAsync(false);
+        }
+        await OperationChanged.InvokeAsync(new("Portable settings", "Backup", null, result, null));
+    }
+
+    private async Task PreviewRestore()
+    {
+        if (restorePath is null || Disabled) return;
+        working = true; message = null; reviewError = null;
+        await InteractionChanged.InvokeAsync(true);
+        try
+        {
+            preview = await Backups.PreviewAsync(restorePath, restorePassphrase, lifetime.Token);
+            restoreAccepted = false; openDialogAfterRender = true;
+        }
+        catch (Exception ex) { message = ex.Message; restorePassphrase = ""; }
+        finally
+        {
+            working = false;
+            if (preview is null) await InteractionChanged.InvokeAsync(false);
+        }
+    }
+
+    private async Task ApproveRestore()
+    {
+        if (preview is null || !restoreAccepted) return;
+        var approvedPreview = preview;
+        working = true; reviewError = null;
+        operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        await JS.InvokeVoidAsync("pcDashboard.closeModal", reviewDialog);
+        await OperationChanged.InvokeAsync(new(Path.GetFileName(approvedPreview.ArchivePath), "Restore",
+            new(ActionProgressStage.Queued, "Waiting to start the approved restore; the archive will be authenticated and a safety backup created."), null, CancelOperation));
+        RestoreResult result;
+        try { result = await Backups.RestoreAsync(approvedPreview, restorePassphrase, operationCancellation.Token); }
+        catch (Exception ex) { result = new(ActionStatus.Failed, ex.Message); }
+        finally
+        {
+            restorePassphrase = ""; restoreAccepted = false; preview = null;
+            operationCancellation.Dispose(); operationCancellation = null; working = false;
+            await InteractionChanged.InvokeAsync(false);
+        }
+        message = result.SafetyBackupPath is null ? result.Message
+            : $"{result.Message} Encrypted safety backup: {Path.GetFileName(result.SafetyBackupPath)}";
+        await OperationChanged.InvokeAsync(new(Path.GetFileName(approvedPreview.ArchivePath), "Restore", null,
+            new(result.Status, Path.GetFileName(approvedPreview.ArchivePath), message,
+                CompletedAt: DateTimeOffset.UtcNow), null));
+        if (result.Status == ActionStatus.Succeeded) await Restored.InvokeAsync();
+    }
+
+    private Task CancelReview() => CloseReview();
+    private async Task CloseReview()
+    {
+        if (preview is null) return;
+        await JS.InvokeVoidAsync("pcDashboard.closeModal", reviewDialog);
+        preview = null; restoreAccepted = false; restorePassphrase = "";
+        focusAfterRenderId = "choose-restore-file";
+        await InteractionChanged.InvokeAsync(false);
+    }
+    private void CancelOperation() => operationCancellation?.Cancel();
+
+    public ValueTask DisposeAsync()
+    {
+        lifetime.Cancel(); operationCancellation?.Cancel(); operationCancellation?.Dispose();
+        lifetime.Dispose(); return ValueTask.CompletedTask;
+    }
+}
