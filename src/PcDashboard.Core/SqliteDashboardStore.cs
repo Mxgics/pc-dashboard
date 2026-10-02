@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace PcDashboard.Core;
 
-public sealed class SqliteDashboardStore : IDashboardStore, IActionStore, ISetupProfileStore
+public sealed class SqliteDashboardStore : IDashboardStore, IActionStore, ISetupProfileStore, IBackupStore
 {
     public const int SchemaVersion = 3;
     private readonly string connectionString;
@@ -213,7 +213,7 @@ public sealed class SqliteDashboardStore : IDashboardStore, IActionStore, ISetup
     public async Task SaveSetupProfileAsync(SetupProfile profile,
         CancellationToken ct = default)
     {
-        ValidateProfile(profile);
+        ValidateSetupProfile(profile);
         using var db = Open();
         using var transaction = db.BeginTransaction();
         using (var save = db.CreateCommand())
@@ -255,7 +255,128 @@ public sealed class SqliteDashboardStore : IDashboardStore, IActionStore, ISetup
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    private static void ValidateProfile(SetupProfile profile)
+    public async Task<BackupPayload> ExportBackupAsync(CancellationToken ct = default)
+    {
+        using var db = Open();
+        using var transaction = db.BeginTransaction();
+        var categories = new List<string>();
+        using (var command = db.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "SELECT name FROM categories ORDER BY name";
+            using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) categories.Add(reader.GetString(0));
+        }
+        var aliases = new List<BackupAlias>();
+        using (var command = db.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "SELECT original,category FROM category_aliases ORDER BY original";
+            using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) aliases.Add(new(reader.GetString(0), reader.GetString(1)));
+        }
+        var assignments = new List<BackupAssignment>();
+        using (var command = db.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "SELECT app_id,category FROM assignments ORDER BY app_id";
+            using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) assignments.Add(new(reader.GetString(0), reader.GetString(1)));
+        }
+        var profiles = new List<SetupProfile>();
+        using (var headers = db.CreateCommand())
+        {
+            headers.Transaction = transaction;
+            headers.CommandText = "SELECT id,name FROM setup_profiles ORDER BY name,id";
+            using var reader = await headers.ExecuteReaderAsync(ct);
+            var profileHeaders = new List<(Guid Id, string Name)>();
+            while (await reader.ReadAsync(ct))
+                profileHeaders.Add((Guid.Parse(reader.GetString(0)), reader.GetString(1)));
+            await reader.DisposeAsync();
+            foreach (var header in profileHeaders)
+            {
+                using var items = db.CreateCommand();
+                items.Transaction = transaction;
+                items.CommandText = "SELECT id,package_id,source,scope FROM setup_profile_items WHERE profile_id=$profile ORDER BY rowid";
+                items.Parameters.AddWithValue("$profile", header.Id.ToString("D"));
+                using var itemReader = await items.ExecuteReaderAsync(ct);
+                var profileItems = new List<SetupProfileItem>();
+                while (await itemReader.ReadAsync(ct))
+                    profileItems.Add(new(Guid.Parse(itemReader.GetString(0)), itemReader.GetString(1),
+                        itemReader.GetString(2), itemReader.GetString(3)));
+                profiles.Add(new(header.Id, header.Name, profileItems));
+            }
+        }
+        transaction.Commit();
+        return new(BackupService.ArchiveVersion, DateTimeOffset.UtcNow,
+            categories, aliases, assignments, profiles);
+    }
+
+    public async Task RestoreBackupAsync(BackupPayload payload, CancellationToken ct = default)
+    {
+        BackupService.ValidatePayload(payload);
+        using var db = Open();
+        using var transaction = db.BeginTransaction();
+        using (var clear = db.CreateCommand())
+        {
+            clear.Transaction = transaction;
+            clear.CommandText = "DELETE FROM setup_profile_items; DELETE FROM setup_profiles; DELETE FROM assignments; DELETE FROM category_aliases; DELETE FROM categories;";
+            await clear.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var category in payload.Categories)
+        {
+            using var insert = db.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO categories(name) VALUES($name)";
+            insert.Parameters.AddWithValue("$name", category);
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var alias in payload.Aliases)
+        {
+            using var insert = db.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO category_aliases(original,category) VALUES($original,$category)";
+            insert.Parameters.AddWithValue("$original", alias.Original);
+            insert.Parameters.AddWithValue("$category", alias.Category);
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var assignment in payload.Assignments)
+        {
+            using var insert = db.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO assignments(app_id,category) VALUES($app,$category)";
+            insert.Parameters.AddWithValue("$app", assignment.AppId);
+            insert.Parameters.AddWithValue("$category", assignment.Category);
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var profile in payload.Profiles)
+        {
+            using (var insert = db.CreateCommand())
+            {
+                insert.Transaction = transaction;
+                insert.CommandText = "INSERT INTO setup_profiles(id,name) VALUES($id,$name)";
+                insert.Parameters.AddWithValue("$id", profile.Id.ToString("D"));
+                insert.Parameters.AddWithValue("$name", profile.Name.Trim());
+                await insert.ExecuteNonQueryAsync(ct);
+            }
+            foreach (var item in profile.Items)
+            {
+                using var insertItem = db.CreateCommand();
+                insertItem.Transaction = transaction;
+                insertItem.CommandText = "INSERT INTO setup_profile_items(id,profile_id,package_id,source,scope) VALUES($id,$profile,$package,$source,$scope)";
+                insertItem.Parameters.AddWithValue("$id", item.Id.ToString("D"));
+                insertItem.Parameters.AddWithValue("$profile", profile.Id.ToString("D"));
+                insertItem.Parameters.AddWithValue("$package", item.PackageId);
+                insertItem.Parameters.AddWithValue("$source", item.Source);
+                insertItem.Parameters.AddWithValue("$scope", item.Scope);
+                await insertItem.ExecuteNonQueryAsync(ct);
+            }
+        }
+        ct.ThrowIfCancellationRequested();
+        transaction.Commit();
+    }
+
+    internal static void ValidateSetupProfile(SetupProfile profile)
     {
         var name = profile.Name.Trim();
         if (name.Length is < 1 or > 80 || name.Any(char.IsControl))

@@ -2,7 +2,7 @@
 
 ## Automated
 
-Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 1 October 2026, 73 checks passed: the V1/V2 cases; V3 setup profiles; and temporary-cleanup age/root filtering, default-empty selection, metadata drift skip, isolated locked-file failure, exact counts/bytes, tamper rejection, pre-action cancellation and safe resulting-empty-directory removal.
+Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 1 October 2026, 83 checks passed: the V1/V2 cases; V3 setup profiles; temporary-cleanup safety cases; and encrypted-backup format, size/version limits, preview, tamper/passphrase, scope, safety-copy, temporary-file and transactional-rollback cases.
 
 Serialized Release solution build (`dotnet build PcDashboard.slnx -c Release --no-restore -m:1`) passed with zero errors. NuGet vulnerability lookup remains unverified because the service was unavailable and emitted NU1900 warnings.
 
@@ -33,6 +33,13 @@ The structured WinGet execution adapter compiles against the pinned 1.29.290 COM
 - Code review confirms production construction derives only the current user's `%TEMP%`, rejects a reparse root, never follows reparse entries, limits results to 50,000 and shares the refresh/mutation gate. Execution rechecks the root and every selected candidate plus its parent chain immediately before deletion.
 - A representative fixture using the shipped CSS passed desktop and 420-pixel review: the modal remained bounded/scrollable, metadata stacked, long paths wrapped, and sticky actions remained available. Its accessibility tree exposed only the named modal, focused heading, incomplete-scan warning, definition-list summary, selected-file region, irreversible-action checkbox, Cancel and disabled Delete action.
 - Native scan/list/review keyboard, focus, screen-reader and narrow-window behavior is not yet verified. A separate disposable filesystem fixture for live reparse/inaccessible-entry races is also unverified. The host's real TEMP contents were not scanned or deleted.
+
+## V3 encrypted backup/restore evidence
+
+- Behavioral checks create only synthetic categories, assignments and profiles in an isolated generated database. They confirm the versioned magic, absence of known plaintext records, authenticated record-count preview, one generic error for wrong passphrase and ciphertext tampering, exact supported-data replacement, inventory exclusion, encrypted pre-restore safety backup, no leftover `.tmp` files and full rollback after a relational insert failure.
+- Code review confirms PBKDF2-HMAC-SHA256 at 600,000 iterations, 16-byte random salt, 12-byte random nonce, AES-256-GCM with a 16-byte tag, authenticated header fields, 10 MiB archive/5 MiB plaintext limits, bounded records/fields, exact encrypted-file digest recheck and encrypted-only same-directory atomic writes. Key, plaintext and archive buffers are cleared where owned after use; passphrase strings are cleared from component state after operations.
+- Release compilation covers the native save/open dialogs, passphrase confirmation, authenticated preview modal, explicit replacement acknowledgement, shared global operation exclusion, encrypted safety-backup reporting, settings reload and post-restore inventory refresh. A representative fixture using the shipped CSS passed desktop and 420-pixel review: the dialog remained bounded/scrollable, long archive names wrapped, count metadata stacked, and sticky actions remained available. Its accessibility tree exposed only the named modal, focused heading, complete definition-list counts, scope exclusions, named replacement checkbox, Cancel and disabled Restore action.
+- Native file-dialog traversal, modal focus restoration, screen-reader announcements, narrow-window behavior and an external safety-backup recovery drill remain unverified. Test archives were generated under the isolated test directory and removed; no personal dashboard backup was created or restored.
 
 ## UI and release checklist
 

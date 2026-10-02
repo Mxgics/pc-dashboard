@@ -64,10 +64,11 @@
         </tbody></table></div>
         @if (!Filtered.Any()) { <div class="empty"><h3>@(Data.Snapshot.Apps.Count == 0 ? "No inventory yet" : "No matching applications")</h3><p>@(Data.Snapshot.Apps.Count == 0 ? "Refresh to read installed applications. Source failures will be shown above." : "Try a different search or clear your filters.")</p></div> }
     </section>
-    <SetupProfiles Disabled="@(RefreshDisabled || reviewPlan is not null)" InteractionChanged="OnMaintenanceInteraction" OperationChanged="OnChildOperation" />
+    <SetupProfiles @key="maintenanceVersion" Disabled="@(RefreshDisabled || reviewPlan is not null)" InteractionChanged="OnMaintenanceInteraction" OperationChanged="OnChildOperation" />
     <TempCleanup Disabled="@(RefreshDisabled || reviewPlan is not null)" InteractionChanged="OnMaintenanceInteraction" OperationChanged="OnChildOperation" />
+    <BackupRestore Disabled="@(RefreshDisabled || reviewPlan is not null)" InteractionChanged="OnMaintenanceInteraction" OperationChanged="OnChildOperation" Restored="OnBackupRestored" />
     <details class="category-editor"><summary>Manage categories</summary><p>Suggestions are a starting point. Your assignments survive refreshes.</p><div class="filters"><label>New category<input maxlength="40" @bind="newCategory" /></label><button @onclick="AddCategory">Create category</button><label>Rename category<select @bind="renameFrom"><option value="">Choose category</option>@foreach (var category in categories) { <option>@category</option> }</select></label><label>New name<input maxlength="40" @bind="renameTo" /></label><button @onclick="RenameCategory">Rename</button></div></details>
-    <footer><p>“None reported” means the checked sources did not report an update. It does not guarantee the latest publisher release.</p><p>Updates, setup, and cleanup require fresh five-minute plans and explicit approval. No uninstall, automatic retry, rollback or automatic reboot is performed.</p></footer>
+    <footer><p>“None reported” means the checked sources did not report an update. It does not guarantee the latest publisher release.</p><p>Updates, setup, cleanup, and restore require explicit review. Backups contain only portable settings and are authenticated and encrypted. No uninstall, automatic retry, rollback claim or automatic reboot is performed.</p></footer>
 </main>
 
 @if (reviewPlan is not null)
@@ -115,6 +116,7 @@
     private ActionResult? actionResult;
     private ElementReference reviewDialog;
     private bool agreementsAccepted, openDialogAfterRender, maintenanceInteraction;
+    private int maintenanceVersion;
     private bool ActionInProgress => actionResult is null && actionProgress is not null;
     private bool ReviewDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null || maintenanceInteraction;
     private bool RefreshDisabled => Data.IsRefreshing || ActionInProgress || preparingId is not null || reviewPlan is not null || maintenanceInteraction;
@@ -152,6 +154,12 @@
         return InvokeAsync(StateHasChanged);
     }
     private async Task LoadCategories() { categories = await Store.CategoriesAsync(); assignments = await Store.AssignmentsAsync(); aliases = await Store.CategoryAliasesAsync(); }
+    private async Task OnBackupRestored()
+    {
+        await LoadCategories();
+        maintenanceVersion++;
+        await Data.RefreshAsync(forceUpdates: true, ct: lifetime.Token);
+    }
     private async Task Assign(string id, string category) { try { await Store.AssignAsync(id, category); await LoadCategories(); message = "Category saved."; } catch (Exception ex) { message = ex.Message; } }
     private async Task AddCategory() { try { await Store.AddCategoryAsync(newCategory); newCategory = ""; await LoadCategories(); message = "Category created."; } catch (Exception ex) { message = $"Could not create category: {ex.Message}"; } }
     private async Task RenameCategory() { try { await Store.RenameCategoryAsync(renameFrom, renameTo); categoryFilter = ""; renameFrom = renameTo = ""; await LoadCategories(); message = "Category renamed."; } catch (Exception ex) { message = $"Could not rename category: {ex.Message}"; } }
