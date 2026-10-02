@@ -12,3 +12,17 @@ Before publication:
 - Choose a license before representing the source as open source; no license is currently supplied.
 
 Committing, pushing and changing repository visibility require explicit authorization. Source availability does not imply V2 execution is complete. See PROJECT-PLAN.md for remaining product work and TEST-PLAN.md for verification limits.
+
+## 2 October 2026 V3 readiness audit
+
+The intended `develop` product stack was audited after refreshing remote refs:
+
+- Six product commits are introduced above `origin/develop`; every commit uses `Mxgics <Mxgics@users.noreply.github.com>`.
+- Introduced Git object names contain no build/output, work-fixture, database, log, archive, inventory/probe, drive-letter or user-profile paths.
+- Current tracked paths contain no generated database, log, `.pcdbak`, build-output or work-fixture files. `WindowsInventory.cs` is legitimate source code, not captured inventory.
+- Current source, `obj` data and Release outputs contain no embedded local workspace/user-profile path; `Directory.Build.props` maps compiler paths to `/_/`.
+- Local `bin`/`obj` and review fixtures are ignored and absent from the intended diff. Test databases and archives were created only under generated test directories and removed.
+- GitHub shows no releases, tags or issues. The latest stacked CI run succeeded and reports no artifacts. Visible pull requests are the authored stack, CI repair and Dependabot updates; no file attachments were used in the authored stack descriptions.
+- The final readiness diff is limited to navigation, conflicting-control exclusion, one operation-gate test and reconciled documentation; its exact staged content receives the same path/content scan before publication as the earlier layers.
+
+This is a source-stack audit, not permission to publish or promote. The current repository must still not be made public: use a new sanitized history with no inherited refs/remotes, choose a license, merge the CI-action repair and synchronize it into `develop`, restore vulnerability-audit availability, complete native accessibility/disposable-VM/recovery scenarios, and independently recheck the final destination immediately before publication. The current GitHub Actions history is metadata/log history even though the inspected latest run has no artifact; it is not part of a new public baseline.

@@ -2,7 +2,7 @@
 
 ## Automated
 
-Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 1 October 2026, 83 checks passed: the V1/V2 cases; V3 setup profiles; temporary-cleanup safety cases; and encrypted-backup format, size/version limits, preview, tamper/passphrase, scope, safety-copy, temporary-file and transactional-rollback cases.
+Run `dotnet run --project tests/PcDashboard.Tests -c Release --no-restore`. The executable harness exits nonzero on a failed assertion. On 2 October 2026, 84 checks passed: the V1/V2 cases; V3 setup profiles; temporary-cleanup safety cases; encrypted-backup format, limits, preview, tamper/passphrase, scope, safety-copy and rollback; and cross-capability operation exclusion.
 
 Serialized Release solution build (`dotnet build PcDashboard.slnx -c Release --no-restore -m:1`) passed with zero errors. NuGet vulnerability lookup remains unverified because the service was unavailable and emitted NU1900 warnings.
 
@@ -40,6 +40,13 @@ The structured WinGet execution adapter compiles against the pinned 1.29.290 COM
 - Code review confirms PBKDF2-HMAC-SHA256 at 600,000 iterations, 16-byte random salt, 12-byte random nonce, AES-256-GCM with a 16-byte tag, authenticated header fields, 10 MiB archive/5 MiB plaintext limits, bounded records/fields, exact encrypted-file digest recheck and encrypted-only same-directory atomic writes. Key, plaintext and archive buffers are cleared where owned after use; passphrase strings are cleared from component state after operations.
 - Release compilation covers the native save/open dialogs, passphrase confirmation, authenticated preview modal, explicit replacement acknowledgement, shared global operation exclusion, encrypted safety-backup reporting, settings reload and post-restore inventory refresh. A representative fixture using the shipped CSS passed desktop and 420-pixel review: the dialog remained bounded/scrollable, long archive names wrapped, count metadata stacked, and sticky actions remained available. Its accessibility tree exposed only the named modal, focused heading, complete definition-list counts, scope exclusions, named replacement checkbox, Cancel and disabled Restore action.
 - Native file-dialog traversal, modal focus restoration, screen-reader announcements, narrow-window behavior and an external safety-backup recovery drill remain unverified. Test archives were generated under the isolated test directory and removed; no personal dashboard backup was created or restored.
+
+## V3 integration-readiness evidence
+
+- A shared-coordinator behavioral check holds Cleanup active and proves Backup is rejected before creating an archive. Existing checks cover refresh/update mutual exclusion, setup sequencing, cleanup isolation and backup/restore transactions.
+- Source review confirms assignment, category-create and category-rename controls now disable during refresh, review and maintenance interaction; setup, cleanup and backup components already receive the same parent disabled state. Passive search, filters and evidence controls remain usable where they cannot mutate shared configuration.
+- A representative fixture using the shipped CSS passed desktop and 420-pixel review. The navigation pills wrapped without clipping, capability cards retained their layout, and the inventory table remained intentionally horizontally scrollable at narrow width. The accessibility tree exposed a named `Dashboard sections` landmark with links to Applications, Setup profiles, Temporary files, Backup & restore and Categories, plus disabled conflicting controls.
+- Native keyboard activation/scroll targeting and screen-reader landmark announcements remain unverified and are release gates.
 
 ## UI and release checklist
 

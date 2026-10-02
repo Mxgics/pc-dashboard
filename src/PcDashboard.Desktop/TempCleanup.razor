@@ -2,7 +2,7 @@
 @inject CleanupService Cleanup
 @inject IJSRuntime JS
 
-<section class="cleanup-panel" aria-labelledby="cleanup-heading" aria-busy="@scanning">
+<section id="temporary-files" class="cleanup-panel" aria-labelledby="cleanup-heading" aria-busy="@scanning">
     <div class="section-title"><div><p class="eyebrow">V3 · REVIEWED CLEANUP</p><h2 id="cleanup-heading">Temporary files</h2></div><div class="actions"><button id="scan-temp-files" disabled="@(Disabled || scanning)" @onclick="Scan">@(scanning ? "Scanning…" : "Scan temporary files")</button>@if (scanning) { <button @onclick="CancelScan">Cancel scan</button> }</div></div>
     <p>Scan only your canonical Windows TEMP folder. Links, reparse points, inaccessible entries, and files newer than seven days are excluded.</p>
     @if (message is not null) { <p class="notice" role="status">@message</p> }

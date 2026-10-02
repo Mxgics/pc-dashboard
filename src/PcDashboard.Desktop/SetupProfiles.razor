@@ -2,7 +2,7 @@
 @inject SetupService Setup
 @inject IJSRuntime JS
 
-<section class="setup-profiles" aria-labelledby="setup-heading" aria-busy="@working">
+<section id="setup-profiles" class="setup-profiles" aria-labelledby="setup-heading" aria-busy="@working">
     <div class="section-title"><div><p class="eyebrow">V3 · REPEATABLE SETUP</p><h2 id="setup-heading">Setup profiles</h2></div><button disabled="@Disabled" @onclick="NewProfile">New profile</button></div>
     <p>Save exact WinGet package, source, and scope choices. Every run shows a fresh plan and requires approval.</p>
     @if (message is not null) { <p class="notice" role="status">@message</p> }

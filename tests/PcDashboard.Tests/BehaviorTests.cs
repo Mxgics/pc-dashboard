@@ -354,6 +354,25 @@ internal static class BehaviorTests
                     "Failed restore rolls back every portable-settings table");
             }
 
+            var integratedOperations = new OperationCoordinator();
+            var gatedBackup = new BackupService(store, new RecordingActionStore(),
+                integratedOperations, clock, backupDirectory);
+            var blockedBackupPath = Path.Combine(directory, "blocked.pcdbak");
+            await using (var activeCleanup = await integratedOperations.TryBeginAsync(ActionKind.Cleanup)
+                ?? throw new Exception("Could not acquire integration-test operation gate"))
+            {
+                try
+                {
+                    await gatedBackup.CreateAsync(blockedBackupPath, passphrase);
+                    throw new Exception("Concurrent backup unexpectedly started");
+                }
+                catch (InvalidOperationException)
+                {
+                    Check(!File.Exists(blockedBackupPath),
+                        "Shared operation gate prevents backup from overlapping cleanup");
+                }
+            }
+
             var cleanupDirectory = Path.Combine(directory, "cleanup-root");
             var cleanupNested = Path.Combine(cleanupDirectory, "nested");
             Directory.CreateDirectory(cleanupNested);
