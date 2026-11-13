@@ -4,12 +4,12 @@
     "net10.0-windows10.0.26100": {
       "Microsoft.AspNetCore.Components.WebView.Wpf": {
         "type": "Direct",
-        "requested": "[10.0.100, )",
-        "resolved": "10.0.100",
-        "contentHash": "7QrdTK0iMufk3YSFjx6CcCwT5gOvE7BFcTM581kQM4t5WJZn6SkW6p6oPTOZ2nIohZswvqHvAa638jZi1ZlZGQ==",
+        "requested": "[10.0.130, )",
+        "resolved": "10.0.130",
+        "contentHash": "YtgpHvdYsegsSsmBl5oC67BgRbdGb6s6t8oe6dcvg77EgJTcyQ58c4dGb1r55K2jhYcfjlJZkKbFJDGrGy/15g==",
         "dependencies": {
           "Microsoft.AspNetCore.Components.WebView": "10.0.0",
-          "Microsoft.Web.WebView2": "1.0.3179.45"
+          "Microsoft.Web.WebView2": "1.0.4314.35"
         }
       },
       "Microsoft.WindowsPackageManager.ComInterop": {
@@ -281,8 +281,8 @@
       },
       "Microsoft.Web.WebView2": {
         "type": "Transitive",
-        "resolved": "1.0.3179.45",
-        "contentHash": "3pokSH5CnN0G6rGhGFo1y87inxYhNxBQ2Vdf0wlvBj99KHxQJormjDACmqRnFeUsmuNFIhWwfAL1ztq7wD5qRA=="
+        "resolved": "1.0.4314.35",
+        "contentHash": "x5MFf2W03xueU1mMNvivXfHSsQ+ODo7vJ36qw/dLtU5Gs+8d7+7N7zzmNNDoT3ffosmcvZNBtUnlzyiDUuBkSQ=="
       },
       "SQLitePCLRaw.bundle_e_sqlite3": {
         "type": "Transitive",
@@ -321,8 +321,8 @@
     "net10.0-windows10.0.26100/win-x64": {
       "Microsoft.Web.WebView2": {
         "type": "Transitive",
-        "resolved": "1.0.3179.45",
-        "contentHash": "3pokSH5CnN0G6rGhGFo1y87inxYhNxBQ2Vdf0wlvBj99KHxQJormjDACmqRnFeUsmuNFIhWwfAL1ztq7wD5qRA=="
+        "resolved": "1.0.4314.35",
+        "contentHash": "x5MFf2W03xueU1mMNvivXfHSsQ+ODo7vJ36qw/dLtU5Gs+8d7+7N7zzmNNDoT3ffosmcvZNBtUnlzyiDUuBkSQ=="
       },
       "SQLitePCLRaw.lib.e_sqlite3": {
         "type": "Transitive",
